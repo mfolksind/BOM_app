@@ -1,0 +1,1372 @@
+import mongoose from 'mongoose';
+import { ProductionOrderModel, IProductionOrder } from './production-order.model';
+import { ProductionBatchModel, IProductionBatch } from './production-batch.model';
+import { MaterialIssueModel, IMaterialIssue } from './material-issue.model';
+import { MaterialIssueLineModel } from './material-issue-line.model';
+import { MaterialConsumptionModel, IMaterialConsumption } from './material-consumption.model';
+import { MaterialReturnModel, IMaterialReturn } from './material-return.model';
+import { ProductionOutputModel, IProductionOutput } from './production-output.model';
+import { ScrapRecordModel, IScrapRecord } from './scrap-record.model';
+import { WorkOrderModel } from '../work-orders/work-order.model';
+import { WarehouseModel } from '../warehouses/warehouse.model';
+import { MaterialModel } from '../materials/material.model';
+import { CustomerModel } from '../customers/customer.model';
+import { InventoryTransactionModel } from '../inventory/inventory-transaction.model';
+import { InventoryBalanceModel } from '../inventory/inventory-balance.model';
+import { inventoryBalanceService } from '../inventory/inventory-balance.service';
+import { InventorySequenceUtil } from '../inventory/inventory-sequence.util';
+import { InventoryAuditUtil } from '../inventory/inventory-audit.util';
+import { InventoryIdempotencyUtil } from '../inventory/inventory-idempotency.util';
+import { StockOwnerType } from '../materials/material-lot.model';
+import { BadRequestError, NotFoundError, ConflictError } from '../../common/errors';
+
+export class ProductionService {
+  /**
+   * Helper to calculate remaining WIP for a material in a work order / batch
+   */
+  async getRemainingWip(params: {
+    workOrderId: mongoose.Types.ObjectId | string;
+    materialId: mongoose.Types.ObjectId | string;
+    lotId?: mongoose.Types.ObjectId | string | null;
+  }): Promise<number> {
+    const workOrderId = new mongoose.Types.ObjectId(params.workOrderId.toString());
+    const materialId = new mongoose.Types.ObjectId(params.materialId.toString());
+
+    // 1. Find all posted issues for this work order
+    const postedIssues = await MaterialIssueModel.find({
+      workOrderId,
+      status: 'ISSUED',
+    }).select('_id');
+    const issueIds = postedIssues.map((i) => i._id);
+
+    const lineMatch: Record<string, unknown> = {
+      materialIssueId: { $in: issueIds },
+      materialId,
+    };
+    if (params.lotId) lineMatch.lotId = new mongoose.Types.ObjectId(params.lotId.toString());
+
+    // Sum issued
+    const issues = issueIds.length
+      ? await MaterialIssueLineModel.aggregate([
+          { $match: lineMatch },
+          { $group: { _id: null, total: { $sum: '$issuedQuantity' } } },
+        ])
+      : [];
+    const totalIssued = issues[0]?.total || 0;
+
+    const movementMatch: Record<string, unknown> = { workOrderId, materialId, status: 'POSTED' };
+    if (params.lotId) movementMatch.lotId = new mongoose.Types.ObjectId(params.lotId.toString());
+
+    // Sum consumed
+    const consumptions = await MaterialConsumptionModel.aggregate([
+      { $match: movementMatch },
+      { $group: { _id: null, total: { $sum: '$consumedQuantity' } } },
+    ]);
+    const totalConsumed = consumptions[0]?.total || 0;
+
+    // Sum returned
+    const returns = await MaterialReturnModel.aggregate([
+      { $match: movementMatch },
+      { $group: { _id: null, total: { $sum: '$returnQuantity' } } },
+    ]);
+    const totalReturned = returns[0]?.total || 0;
+
+    // Sum scrapped
+    const scraps = await ScrapRecordModel.aggregate([
+      { $match: movementMatch },
+      { $group: { _id: null, total: { $sum: '$scrapQuantity' } } },
+    ]);
+    const totalScrapped = scraps[0]?.total || 0;
+
+    const remaining = totalIssued - totalConsumed - totalReturned - totalScrapped;
+    return Number(Math.max(0, remaining).toFixed(4));
+  }
+
+  // ==========================================
+  // 1. PRODUCTION ORDERS
+  // ==========================================
+
+  async createProductionOrder(
+    workOrderId: string,
+    dto: {
+      plannedLengthMeters?: number;
+      startDate?: string | Date;
+      targetCompletionDate: string | Date;
+      remarks?: string;
+    },
+    userId?: string,
+  ): Promise<IProductionOrder> {
+    const workOrder = await WorkOrderModel.findById(workOrderId);
+    if (!workOrder) throw new NotFoundError('Work order not found');
+
+    if (workOrder.status !== 'CONFIRMED' && workOrder.status !== 'IN_PROGRESS') {
+      throw new BadRequestError(
+        `Cannot create production order for work order in '${workOrder.status}' status. Must be CONFIRMED or IN_PROGRESS.`,
+      );
+    }
+
+    const plannedLength = dto.plannedLengthMeters || workOrder.orderedLengthMeters;
+    const productionOrderNumber = await InventorySequenceUtil.getNextSequence(
+      'PRODUCTION_ORDER',
+      'PRD',
+    );
+
+    const productionOrder = await ProductionOrderModel.create({
+      productionOrderNumber,
+      workOrderId: workOrder._id,
+      customerId: workOrder.customerId,
+      productId: workOrder.productId,
+      bomVersionId: workOrder.bomVersionId,
+      plannedLengthMeters: plannedLength,
+      producedLengthMeters: 0,
+      startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
+      targetCompletionDate: new Date(dto.targetCompletionDate),
+      status: 'RELEASED',
+      releasedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+      releasedAt: new Date(),
+      remarks: dto.remarks,
+    });
+
+    if (workOrder.status === 'CONFIRMED') {
+      workOrder.status = 'IN_PROGRESS';
+      await workOrder.save();
+    }
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'CREATE',
+        entityType: 'ProductionOrder',
+        entityId: productionOrder._id,
+        performedBy: userId,
+        newValues: { productionOrderNumber, plannedLengthMeters: plannedLength },
+      });
+    }
+
+    return productionOrder;
+  }
+
+  async listProductionOrders(filter: {
+    page: number;
+    limit: number;
+    workOrderId?: string;
+    customerId?: string;
+    productId?: string;
+    status?: string;
+    search?: string;
+  }) {
+    const query: Record<string, unknown> = {};
+    if (filter.workOrderId) query.workOrderId = new mongoose.Types.ObjectId(filter.workOrderId);
+    if (filter.customerId) query.customerId = new mongoose.Types.ObjectId(filter.customerId);
+    if (filter.productId) query.productId = new mongoose.Types.ObjectId(filter.productId);
+    if (filter.status) query.status = filter.status;
+    if (filter.search) {
+      query.productionOrderNumber = new RegExp(filter.search, 'i');
+    }
+
+    const skip = (filter.page - 1) * filter.limit;
+    const [orders, total] = await Promise.all([
+      ProductionOrderModel.find(query)
+        .populate('workOrderId', 'workOrderNumber orderedLengthMeters status')
+        .populate('productId', 'code name voltageGrade cableCategory')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(filter.limit)
+        .lean(),
+      ProductionOrderModel.countDocuments(query),
+    ]);
+
+    return {
+      productionOrders: orders,
+      pagination: {
+        page: filter.page,
+        limit: filter.limit,
+        total,
+        totalPages: Math.ceil(total / filter.limit) || 1,
+      },
+    };
+  }
+
+  async getProductionOrderById(id: string): Promise<IProductionOrder> {
+    const order = await ProductionOrderModel.findById(id)
+      .populate('workOrderId')
+      .populate('productId')
+      .populate('bomVersionId')
+      .populate('releasedBy', 'firstName lastName email');
+
+    if (!order) throw new NotFoundError(`Production order '${id}' not found`);
+    return order;
+  }
+
+  async startProductionOrder(id: string, userId?: string): Promise<IProductionOrder> {
+    const order = await ProductionOrderModel.findById(id);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    if (order.status !== 'RELEASED' && order.status !== 'DRAFT') {
+      throw new BadRequestError(`Cannot start production order with status '${order.status}'`);
+    }
+
+    order.status = 'IN_PROGRESS';
+    order.startedAt = new Date();
+    await order.save();
+
+    await WorkOrderModel.findByIdAndUpdate(order.workOrderId, { status: 'IN_PROGRESS' });
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionOrder',
+        entityId: order._id,
+        performedBy: userId,
+        newValues: { status: 'IN_PROGRESS' },
+      });
+    }
+
+    return order;
+  }
+
+  async completeProductionOrder(id: string, userId?: string): Promise<IProductionOrder> {
+    const order = await ProductionOrderModel.findById(id);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    if (order.status === 'COMPLETED') {
+      throw new BadRequestError('Production order is already COMPLETED');
+    }
+
+    order.status = 'COMPLETED';
+    order.completedAt = new Date();
+    await order.save();
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionOrder',
+        entityId: order._id,
+        performedBy: userId,
+        newValues: { status: 'COMPLETED' },
+      });
+    }
+
+    return order;
+  }
+
+  // ==========================================
+  // 2. PRODUCTION BATCHES
+  // ==========================================
+
+  async createProductionBatch(
+    productionOrderId: string,
+    dto: {
+      processStageId: string;
+      machineCode: string;
+      plannedQuantity: number;
+      unit?: string;
+      shift?: 'SHIFT_A' | 'SHIFT_B' | 'SHIFT_C';
+      operatorId?: string;
+      remarks?: string;
+    },
+    userId?: string,
+  ): Promise<IProductionBatch> {
+    const order = await ProductionOrderModel.findById(productionOrderId);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    const batchNumber = await InventorySequenceUtil.getNextSequence('BATCH', 'BAT');
+
+    const batch = await ProductionBatchModel.create({
+      batchNumber,
+      productionOrderId: order._id,
+      workOrderId: order.workOrderId,
+      processStageId: new mongoose.Types.ObjectId(dto.processStageId),
+      machineCode: dto.machineCode.toUpperCase(),
+      plannedQuantity: dto.plannedQuantity,
+      completedQuantity: 0,
+      unit: dto.unit || 'METER',
+      status: 'IN_PROCESS',
+      shift: dto.shift,
+      operatorId: dto.operatorId ? new mongoose.Types.ObjectId(dto.operatorId) : undefined,
+      startedAt: new Date(),
+      remarks: dto.remarks,
+    });
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'CREATE',
+        entityType: 'ProductionBatch',
+        entityId: batch._id,
+        performedBy: userId,
+        newValues: { batchNumber, machineCode: dto.machineCode },
+      });
+    }
+
+    return batch;
+  }
+
+  async getProductionBatchById(id: string): Promise<IProductionBatch> {
+    const batch = await ProductionBatchModel.findById(id)
+      .populate('productionOrderId')
+      .populate('processStageId')
+      .populate('operatorId', 'firstName lastName email employeeCode');
+
+    if (!batch) throw new NotFoundError(`Production batch '${id}' not found`);
+    return batch;
+  }
+
+  async updateProductionBatch(
+    id: string,
+    dto: {
+      status?: 'PENDING' | 'IN_PROCESS' | 'COMPLETED' | 'HALTED' | 'REJECTED';
+      completedQuantity?: number;
+      remarks?: string;
+    },
+    userId?: string,
+  ): Promise<IProductionBatch> {
+    const batch = await ProductionBatchModel.findById(id);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    if (dto.status) batch.status = dto.status;
+    if (dto.completedQuantity !== undefined) batch.completedQuantity = dto.completedQuantity;
+    if (dto.remarks !== undefined) batch.remarks = dto.remarks;
+    if (dto.status === 'COMPLETED' && !batch.completedAt) batch.completedAt = new Date();
+
+    await batch.save();
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionBatch',
+        entityId: batch._id,
+        performedBy: userId,
+        newValues: dto,
+      });
+    }
+
+    return batch;
+  }
+
+  // ==========================================
+  // 3. MATERIAL ISSUE TO PRODUCTION
+  // ==========================================
+
+  async createMaterialIssue(
+    productionOrderId: string,
+    dto: {
+      sourceWarehouseId: string;
+      destinationWarehouseId: string;
+      processStageId?: string;
+      remarks?: string;
+      lines: Array<{
+        materialId: string;
+        lotId?: string;
+        ownerType: StockOwnerType;
+        customerId?: string;
+        issuedQuantity: number;
+        unit: string;
+        remarks?: string;
+      }>;
+    },
+    userId?: string,
+  ): Promise<IMaterialIssue> {
+    const order = await ProductionOrderModel.findById(productionOrderId);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    const sourceWarehouse = await WarehouseModel.findById(dto.sourceWarehouseId);
+    if (!sourceWarehouse || !sourceWarehouse.isActive) {
+      throw new BadRequestError('Source warehouse not found or is inactive');
+    }
+
+    const destWarehouse = await WarehouseModel.findById(dto.destinationWarehouseId);
+    if (!destWarehouse || !destWarehouse.isActive) {
+      throw new BadRequestError('Destination warehouse not found or is inactive');
+    }
+
+    if (sourceWarehouse._id.toString() === destWarehouse._id.toString()) {
+      throw new BadRequestError('Destination warehouse must be different from source warehouse');
+    }
+
+    const issueNumber = await InventorySequenceUtil.getNextSequence('ISSUE', 'ISS');
+
+    const issue = await MaterialIssueModel.create({
+      issueNumber,
+      productionOrderId: order._id,
+      workOrderId: order.workOrderId,
+      processStageId: dto.processStageId
+        ? new mongoose.Types.ObjectId(dto.processStageId)
+        : undefined,
+      sourceWarehouseId: sourceWarehouse._id,
+      destinationWarehouseId: destWarehouse._id,
+      issuedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+      status: 'DRAFT',
+      issueDate: new Date(),
+      remarks: dto.remarks,
+    });
+
+    const lines = dto.lines.map((l) => ({
+      materialIssueId: issue._id,
+      materialId: new mongoose.Types.ObjectId(l.materialId),
+      lotId: l.lotId ? new mongoose.Types.ObjectId(l.lotId) : undefined,
+      ownerType: l.ownerType,
+      customerId: l.customerId ? new mongoose.Types.ObjectId(l.customerId) : undefined,
+      issuedQuantity: l.issuedQuantity,
+      unit: l.unit,
+      remarks: l.remarks,
+    }));
+
+    await MaterialIssueLineModel.insertMany(lines);
+    return issue;
+  }
+
+  async listMaterialIssues(filter: {
+    page: number;
+    limit: number;
+    productionOrderId?: string;
+    workOrderId?: string;
+    status?: string;
+  }) {
+    const query: Record<string, unknown> = {};
+    if (filter.productionOrderId)
+      query.productionOrderId = new mongoose.Types.ObjectId(filter.productionOrderId);
+    if (filter.workOrderId) query.workOrderId = new mongoose.Types.ObjectId(filter.workOrderId);
+    if (filter.status) query.status = filter.status;
+
+    const skip = (filter.page - 1) * filter.limit;
+    const [issues, total] = await Promise.all([
+      MaterialIssueModel.find(query)
+        .populate('sourceWarehouseId', 'code name type')
+        .populate('destinationWarehouseId', 'code name type')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(filter.limit)
+        .lean(),
+      MaterialIssueModel.countDocuments(query),
+    ]);
+
+    return {
+      materialIssues: issues,
+      pagination: {
+        page: filter.page,
+        limit: filter.limit,
+        total,
+        totalPages: Math.ceil(total / filter.limit) || 1,
+      },
+    };
+  }
+
+  async getMaterialIssueById(id: string) {
+    const issue = await MaterialIssueModel.findById(id)
+      .populate('sourceWarehouseId')
+      .populate('destinationWarehouseId')
+      .populate('productionOrderId');
+
+    if (!issue) throw new NotFoundError('Material issue not found');
+
+    const lines = await MaterialIssueLineModel.find({ materialIssueId: issue._id })
+      .populate('materialId', 'code name baseUnit')
+      .populate('lotId', 'lotNumber supplierHeatNumber');
+
+    return { ...issue.toObject(), lines };
+  }
+
+  async postMaterialIssue(id: string, idempotencyKey?: string, userId?: string) {
+    const endpoint = `/api/v1/material-issues/${id}/post`;
+
+    if (idempotencyKey) {
+      const existingRecord = await InventoryIdempotencyUtil.findRecord(idempotencyKey, endpoint);
+      if (existingRecord) {
+        return existingRecord.responseBody;
+      }
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const issue = await MaterialIssueModel.findById(id).session(session);
+      if (!issue) throw new NotFoundError('Material issue not found');
+
+      if (issue.status === 'ISSUED') {
+        throw new ConflictError('Material issue is already POSTED / ISSUED');
+      }
+      if (issue.status !== 'DRAFT') {
+        throw new BadRequestError(`Cannot post material issue with status '${issue.status}'`);
+      }
+
+      const lines = await MaterialIssueLineModel.find({ materialIssueId: issue._id }).session(
+        session,
+      );
+      if (!lines.length) throw new BadRequestError('Cannot post an issue with no line items');
+
+      for (const line of lines) {
+        // 1. Decrease stock at store warehouse
+        await inventoryBalanceService.decreaseStock({
+          materialId: line.materialId,
+          warehouseId: issue.sourceWarehouseId,
+          ownerType: line.ownerType,
+          customerId: line.customerId,
+          lotId: line.lotId,
+          quantity: line.issuedQuantity,
+          unit: line.unit,
+          session,
+        });
+
+        // 2. Increase stock at destination WIP warehouse
+        await inventoryBalanceService.increaseStock({
+          materialId: line.materialId,
+          warehouseId: issue.destinationWarehouseId!,
+          ownerType: line.ownerType,
+          customerId: line.customerId,
+          lotId: line.lotId,
+          quantity: line.issuedQuantity,
+          unit: line.unit,
+          session,
+        });
+
+        // 3. Create outbound ledger movement (ISSUE_TO_PRODUCTION)
+        const txnOutNumber = await InventorySequenceUtil.getNextSequence(
+          'INVENTORY_TRANSACTION',
+          'TXN',
+          session,
+        );
+        const txn = await InventoryTransactionModel.create(
+          [
+            {
+              transactionNumber: txnOutNumber,
+              movementType: 'TRANSFER',
+              transactionType: 'ISSUE_TO_PRODUCTION',
+              materialId: line.materialId,
+              warehouseId: issue.sourceWarehouseId,
+              lotId: line.lotId || null,
+              ownerType: line.ownerType,
+              customerId: line.customerId || null,
+              quantity: line.issuedQuantity,
+              unit: line.unit,
+              status: 'POSTED',
+              sourceDocumentType: 'MATERIAL_ISSUE',
+              sourceDocumentId: issue._id,
+              sourceDocumentLineId: line._id,
+              postedAt: new Date(),
+              postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+              remarks: `Issued from Store to WIP for Production Order`,
+            },
+          ],
+          { session },
+        );
+
+        line.inventoryTransactionId = txn[0]._id;
+        await line.save({ session });
+      }
+
+      issue.status = 'ISSUED';
+      issue.postedAt = new Date();
+      if (userId) issue.postedBy = new mongoose.Types.ObjectId(userId);
+      await issue.save({ session });
+
+      // Mark work order IN_PROGRESS if not already
+      if (issue.workOrderId) {
+        await WorkOrderModel.findByIdAndUpdate(
+          issue.workOrderId,
+          { status: 'IN_PROGRESS' },
+          { session },
+        );
+      }
+
+      const responseData = {
+        message: 'Material issue successfully posted to stock ledger and WIP',
+        issueId: issue._id,
+        issueNumber: issue.issueNumber,
+        status: issue.status,
+      };
+
+      if (idempotencyKey) {
+        await InventoryIdempotencyUtil.recordResponse(
+          idempotencyKey,
+          endpoint,
+          InventoryIdempotencyUtil.computeHash({ id }),
+          200,
+          responseData,
+          session,
+        );
+      }
+
+      await session.commitTransaction();
+      return responseData;
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  // ==========================================
+  // 4. ACTUAL MATERIAL CONSUMPTION
+  // ==========================================
+
+  async recordConsumption(
+    batchId: string,
+    dto: {
+      materialId: string;
+      lotId?: string;
+      ownerType: StockOwnerType;
+      customerId?: string;
+      warehouseId: string;
+      consumedQuantity: number;
+      unit: string;
+      remarks?: string;
+    },
+    userId?: string,
+  ): Promise<IMaterialConsumption> {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const remainingWip = await this.getRemainingWip({
+      workOrderId: batch.workOrderId!,
+      materialId: dto.materialId,
+      lotId: dto.lotId,
+    });
+
+    if (dto.consumedQuantity > remainingWip) {
+      throw new BadRequestError(
+        `Consumption quantity (${dto.consumedQuantity} ${dto.unit}) exceeds remaining eligible material in WIP (${remainingWip} ${dto.unit}).`,
+      );
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // 1. Decrease stock from WIP warehouse
+      await inventoryBalanceService.decreaseStock({
+        materialId: dto.materialId,
+        warehouseId: dto.warehouseId,
+        ownerType: dto.ownerType,
+        customerId: dto.customerId,
+        lotId: dto.lotId,
+        quantity: dto.consumedQuantity,
+        unit: dto.unit,
+        session,
+      });
+
+      // 2. Create consumption record
+      const consumptionNumber = await InventorySequenceUtil.getNextSequence(
+        'CONSUMPTION',
+        'CON',
+        session,
+      );
+      const consumption = await MaterialConsumptionModel.create(
+        [
+          {
+            consumptionNumber,
+            productionOrderId: batch.productionOrderId,
+            productionBatchId: batch._id,
+            workOrderId: batch.workOrderId,
+            processStageId: batch.processStageId,
+            warehouseId: new mongoose.Types.ObjectId(dto.warehouseId),
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : undefined,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : undefined,
+            consumedQuantity: dto.consumedQuantity,
+            unit: dto.unit,
+            status: 'POSTED',
+            consumedAt: new Date(),
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            remarks: dto.remarks,
+          },
+        ],
+        { session },
+      );
+
+      // 3. Post immutable outward ledger transaction
+      const txnNumber = await InventorySequenceUtil.getNextSequence(
+        'INVENTORY_TRANSACTION',
+        'TXN',
+        session,
+      );
+      const txn = await InventoryTransactionModel.create(
+        [
+          {
+            transactionNumber: txnNumber,
+            movementType: 'OUTWARD',
+            transactionType: 'CONSUMPTION',
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            warehouseId: new mongoose.Types.ObjectId(dto.warehouseId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : null,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : null,
+            quantity: dto.consumedQuantity,
+            unit: dto.unit,
+            status: 'POSTED',
+            sourceDocumentType: 'MATERIAL_CONSUMPTION',
+            sourceDocumentId: consumption[0]._id,
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            remarks: `Actual consumption in manufacturing batch ${batch.batchNumber}`,
+          },
+        ],
+        { session },
+      );
+
+      consumption[0].inventoryTransactionId = txn[0]._id;
+      await consumption[0].save({ session });
+
+      await session.commitTransaction();
+      return consumption[0];
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  async listConsumptions(batchId: string) {
+    return MaterialConsumptionModel.find({ productionBatchId: batchId })
+      .populate('materialId', 'code name baseUnit')
+      .populate('lotId', 'lotNumber supplierHeatNumber')
+      .sort({ createdAt: -1 });
+  }
+
+  // ==========================================
+  // 5. UNUSED MATERIAL RETURNS
+  // ==========================================
+
+  async recordMaterialReturn(
+    batchId: string,
+    dto: {
+      materialId: string;
+      lotId?: string;
+      ownerType: StockOwnerType;
+      customerId?: string;
+      sourceWarehouseId: string;
+      destinationWarehouseId: string;
+      returnQuantity: number;
+      unit: string;
+      reason?: string;
+    },
+    userId?: string,
+  ): Promise<IMaterialReturn> {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const remainingWip = await this.getRemainingWip({
+      workOrderId: batch.workOrderId!,
+      materialId: dto.materialId,
+      lotId: dto.lotId,
+    });
+
+    if (dto.returnQuantity > remainingWip) {
+      throw new BadRequestError(
+        `Return quantity (${dto.returnQuantity} ${dto.unit}) exceeds remaining eligible material in WIP (${remainingWip} ${dto.unit}).`,
+      );
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // 1. Decrease stock in source WIP warehouse
+      await inventoryBalanceService.decreaseStock({
+        materialId: dto.materialId,
+        warehouseId: dto.sourceWarehouseId,
+        ownerType: dto.ownerType,
+        customerId: dto.customerId,
+        lotId: dto.lotId,
+        quantity: dto.returnQuantity,
+        unit: dto.unit,
+        session,
+      });
+
+      // 2. Increase stock in destination Store warehouse
+      await inventoryBalanceService.increaseStock({
+        materialId: dto.materialId,
+        warehouseId: dto.destinationWarehouseId,
+        ownerType: dto.ownerType,
+        customerId: dto.customerId,
+        lotId: dto.lotId,
+        quantity: dto.returnQuantity,
+        unit: dto.unit,
+        session,
+      });
+
+      // 3. Create MaterialReturn record
+      const returnNumber = await InventorySequenceUtil.getNextSequence('RETURN', 'RET', session);
+      const returnDoc = await MaterialReturnModel.create(
+        [
+          {
+            returnNumber,
+            workOrderId: batch.workOrderId,
+            productionOrderId: batch.productionOrderId,
+            productionBatchId: batch._id,
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : undefined,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : undefined,
+            returnQuantity: dto.returnQuantity,
+            unit: dto.unit,
+            sourceWarehouseId: new mongoose.Types.ObjectId(dto.sourceWarehouseId),
+            destinationWarehouseId: new mongoose.Types.ObjectId(dto.destinationWarehouseId),
+            status: 'POSTED',
+            reason: dto.reason,
+            recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            recordedAt: new Date(),
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+          },
+        ],
+        { session },
+      );
+
+      // 4. Create RETURN_TO_STORE ledger entry
+      const txnNumber = await InventorySequenceUtil.getNextSequence(
+        'INVENTORY_TRANSACTION',
+        'TXN',
+        session,
+      );
+      const txn = await InventoryTransactionModel.create(
+        [
+          {
+            transactionNumber: txnNumber,
+            movementType: 'TRANSFER',
+            transactionType: 'RETURN_TO_STORE',
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            warehouseId: new mongoose.Types.ObjectId(dto.destinationWarehouseId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : null,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : null,
+            quantity: dto.returnQuantity,
+            unit: dto.unit,
+            status: 'POSTED',
+            sourceDocumentType: 'MATERIAL_RETURN',
+            sourceDocumentId: returnDoc[0]._id,
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            remarks: `Unused material returned from production batch ${batch.batchNumber} to store`,
+          },
+        ],
+        { session },
+      );
+
+      returnDoc[0].inventoryTransactionId = txn[0]._id;
+      await returnDoc[0].save({ session });
+
+      await session.commitTransaction();
+      return returnDoc[0];
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  async listMaterialReturns(batchId: string) {
+    return MaterialReturnModel.find({ productionBatchId: batchId })
+      .populate('materialId', 'code name baseUnit')
+      .populate('sourceWarehouseId', 'code name')
+      .populate('destinationWarehouseId', 'code name')
+      .sort({ createdAt: -1 });
+  }
+
+  // ==========================================
+  // 6. PRODUCTION OUTPUT
+  // ==========================================
+
+  async createProductionOutput(
+    batchId: string,
+    dto: {
+      outputLengthMeters: number;
+      outputWeightKg: number;
+      targetWarehouseId: string;
+      isFinalStage?: boolean;
+      drumId?: string;
+      qualityStatus?: 'PASSED' | 'PENDING' | 'REJECTED';
+      testReportNumber?: string;
+      remarks?: string;
+    },
+    userId?: string,
+  ): Promise<IProductionOutput> {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const order = await ProductionOrderModel.findById(batch.productionOrderId);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    const warehouse = await WarehouseModel.findById(dto.targetWarehouseId);
+    if (!warehouse || !warehouse.isActive) {
+      throw new BadRequestError('Target warehouse not found or is inactive');
+    }
+
+    const outputNumber = await InventorySequenceUtil.getNextSequence('OUTPUT', 'OUT');
+
+    const output = await ProductionOutputModel.create({
+      outputNumber,
+      productionOrderId: order._id,
+      productionBatchId: batch._id,
+      workOrderId: order.workOrderId,
+      productId: order.productId,
+      processStageId: batch.processStageId,
+      outputLengthMeters: dto.outputLengthMeters,
+      outputWeightKg: dto.outputWeightKg,
+      targetWarehouseId: warehouse._id,
+      isFinalStage: dto.isFinalStage ?? false,
+      drumId: dto.drumId ? new mongoose.Types.ObjectId(dto.drumId) : undefined,
+      qualityStatus: dto.qualityStatus || 'PASSED',
+      status: 'DRAFT',
+      testReportNumber: dto.testReportNumber,
+      testedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+      remarks: dto.remarks,
+    });
+
+    return output;
+  }
+
+  async listProductionOutputs(batchId: string) {
+    return ProductionOutputModel.find({ productionBatchId: batchId })
+      .populate('targetWarehouseId', 'code name type')
+      .populate('drumId', 'drumNumber')
+      .sort({ createdAt: -1 });
+  }
+
+  async getProductionOutputById(id: string) {
+    const output = await ProductionOutputModel.findById(id)
+      .populate('productionOrderId')
+      .populate('productionBatchId')
+      .populate('targetWarehouseId')
+      .populate('drumId');
+
+    if (!output) throw new NotFoundError('Production output not found');
+    return output;
+  }
+
+  async postProductionOutput(id: string, userId?: string) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const output = await ProductionOutputModel.findById(id).session(session);
+      if (!output) throw new NotFoundError('Production output not found');
+
+      if (output.status === 'POSTED') {
+        throw new ConflictError('Production output is already POSTED');
+      }
+
+      // If passed and final stage, update produced length on batch and work order
+      if (output.qualityStatus === 'PASSED' && output.isFinalStage) {
+        await WorkOrderModel.findByIdAndUpdate(
+          output.workOrderId,
+          { $inc: { deliveredLengthMeters: output.outputLengthMeters } },
+          { session },
+        );
+
+        await ProductionOrderModel.findByIdAndUpdate(
+          output.productionOrderId,
+          { $inc: { producedLengthMeters: output.outputLengthMeters } },
+          { session },
+        );
+
+        await ProductionBatchModel.findByIdAndUpdate(
+          output.productionBatchId,
+          { $inc: { completedQuantity: output.outputLengthMeters } },
+          { session },
+        );
+      }
+
+      output.status = 'POSTED';
+      output.postedAt = new Date();
+      if (userId) output.postedBy = new mongoose.Types.ObjectId(userId);
+      await output.save({ session });
+
+      await session.commitTransaction();
+      return {
+        message: 'Production output posted successfully',
+        outputId: output._id,
+        outputNumber: output.outputNumber,
+        status: output.status,
+      };
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  // ==========================================
+  // 7. SCRAP, PROCESS LOSS, & REUSABLE MATERIAL
+  // ==========================================
+
+  async recordScrap(
+    batchId: string,
+    dto: {
+      materialId: string;
+      lotId?: string;
+      ownerType: StockOwnerType;
+      customerId?: string;
+      scrapType: string;
+      scrapCategory: 'REUSABLE' | 'SALEABLE' | 'PROCESS_LOSS' | 'REJECTED';
+      scrapQuantity: number;
+      unit?: string;
+      sourceWarehouseId: string;
+      scrapWarehouseId: string;
+      reason?: string;
+    },
+    userId?: string,
+  ): Promise<IScrapRecord> {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const remainingWip = await this.getRemainingWip({
+      workOrderId: batch.workOrderId!,
+      materialId: dto.materialId,
+      lotId: dto.lotId,
+    });
+
+    if (dto.scrapQuantity > remainingWip) {
+      throw new BadRequestError(
+        `Scrap quantity (${dto.scrapQuantity} ${dto.unit || 'KG'}) exceeds remaining eligible material in WIP (${remainingWip} ${dto.unit || 'KG'}).`,
+      );
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // 1. Decrease from WIP warehouse
+      await inventoryBalanceService.decreaseStock({
+        materialId: dto.materialId,
+        warehouseId: dto.sourceWarehouseId,
+        ownerType: dto.ownerType,
+        customerId: dto.customerId,
+        lotId: dto.lotId,
+        quantity: dto.scrapQuantity,
+        unit: dto.unit || 'KG',
+        session,
+      });
+
+      // 2. If reusable or saleable, add to scrap warehouse
+      if (dto.scrapCategory === 'REUSABLE' || dto.scrapCategory === 'SALEABLE') {
+        await inventoryBalanceService.increaseStock({
+          materialId: dto.materialId,
+          warehouseId: dto.scrapWarehouseId,
+          ownerType: dto.ownerType,
+          customerId: dto.customerId,
+          lotId: dto.lotId,
+          quantity: dto.scrapQuantity,
+          unit: dto.unit || 'KG',
+          session,
+        });
+      }
+
+      // 3. Create ScrapRecord
+      const scrapNumber = await InventorySequenceUtil.getNextSequence('SCRAP', 'SCR', session);
+      const scrap = await ScrapRecordModel.create(
+        [
+          {
+            scrapNumber,
+            productionOrderId: batch.productionOrderId,
+            productionBatchId: batch._id,
+            workOrderId: batch.workOrderId,
+            processStageId: batch.processStageId,
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : undefined,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : undefined,
+            scrapType: dto.scrapType,
+            scrapCategory: dto.scrapCategory,
+            scrapQuantity: dto.scrapQuantity,
+            unit: dto.unit || 'KG',
+            sourceWarehouseId: new mongoose.Types.ObjectId(dto.sourceWarehouseId),
+            scrapWarehouseId: new mongoose.Types.ObjectId(dto.scrapWarehouseId),
+            status: 'POSTED',
+            reason: dto.reason,
+            recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            recordedAt: new Date(),
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+          },
+        ],
+        { session },
+      );
+
+      // 4. Create SCRAP transaction
+      const txnNumber = await InventorySequenceUtil.getNextSequence(
+        'INVENTORY_TRANSACTION',
+        'TXN',
+        session,
+      );
+      const txn = await InventoryTransactionModel.create(
+        [
+          {
+            transactionNumber: txnNumber,
+            movementType: 'OUTWARD',
+            transactionType: 'SCRAP',
+            materialId: new mongoose.Types.ObjectId(dto.materialId),
+            warehouseId: new mongoose.Types.ObjectId(dto.sourceWarehouseId),
+            lotId: dto.lotId ? new mongoose.Types.ObjectId(dto.lotId) : null,
+            ownerType: dto.ownerType,
+            customerId: dto.customerId ? new mongoose.Types.ObjectId(dto.customerId) : null,
+            quantity: dto.scrapQuantity,
+            unit: dto.unit || 'KG',
+            status: 'POSTED',
+            sourceDocumentType: 'SCRAP_RECORD',
+            sourceDocumentId: scrap[0]._id,
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            remarks: `Scrap recorded (${dto.scrapCategory}): ${dto.scrapType} from batch ${batch.batchNumber}`,
+          },
+        ],
+        { session },
+      );
+
+      scrap[0].inventoryTransactionId = txn[0]._id;
+      await scrap[0].save({ session });
+
+      await session.commitTransaction();
+      return scrap[0];
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  async listScrapRecords(batchId: string) {
+    return ScrapRecordModel.find({ productionBatchId: batchId })
+      .populate('materialId', 'code name baseUnit')
+      .populate('scrapWarehouseId', 'code name')
+      .sort({ createdAt: -1 });
+  }
+
+  // ==========================================
+  // 8. CUSTOMER-WISE & ORDER-WISE MATERIAL RECONCILIATION
+  // ==========================================
+
+  async getCustomerMaterialReconciliation(
+    customerId: string,
+    options?: { startDate?: string; endDate?: string; materialId?: string },
+  ) {
+    const customer = await CustomerModel.findById(customerId);
+    if (!customer) throw new NotFoundError('Customer not found');
+
+    const customerObjId = customer._id;
+    const materialMatch: Record<string, unknown> = {};
+    if (options?.materialId) {
+      materialMatch._id = new mongoose.Types.ObjectId(options.materialId);
+    }
+
+    const materials = await MaterialModel.find(materialMatch);
+    const dateQuery: Record<string, unknown> = {};
+    if (options?.startDate || options?.endDate) {
+      dateQuery.postedAt = {};
+      if (options.startDate)
+        (dateQuery.postedAt as Record<string, unknown>).$gte = new Date(options.startDate);
+      if (options.endDate)
+        (dateQuery.postedAt as Record<string, unknown>).$lte = new Date(options.endDate);
+    }
+
+    const report = await Promise.all(
+      materials.map(async (mat) => {
+        const matId = mat._id;
+
+        // 1. Receipts (grouped by Inbound Challan and line)
+        const receipts = await InventoryTransactionModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          transactionType: 'RECEIPT',
+          ...dateQuery,
+        }).populate('sourceDocumentId');
+
+        const totalReceived = receipts.reduce((sum, r) => sum + r.quantity, 0);
+
+        // Challan breakdown
+        const challanBreakdown = receipts.map((r) => ({
+          transactionNumber: r.transactionNumber,
+          quantity: r.quantity,
+          unit: r.unit,
+          lotId: r.lotId,
+          sourceDocumentId: r.sourceDocumentId,
+          postedAt: r.postedAt,
+        }));
+
+        // 2. Opening balance
+        const openingTransactions = await InventoryTransactionModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          transactionType: 'OPENING_BALANCE',
+        });
+        const openingQuantity = openingTransactions.reduce((sum, o) => sum + o.quantity, 0);
+
+        // 3. Issues to production
+        const issues = await InventoryTransactionModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          transactionType: 'ISSUE_TO_PRODUCTION',
+          ...dateQuery,
+        });
+        const totalIssued = issues.reduce((sum, i) => sum + i.quantity, 0);
+
+        // 4. Actual consumption
+        const consumptions = await InventoryTransactionModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          transactionType: 'CONSUMPTION',
+          ...dateQuery,
+        });
+        const totalConsumed = consumptions.reduce((sum, c) => sum + c.quantity, 0);
+
+        // 5. Returns
+        const returns = await InventoryTransactionModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          transactionType: 'RETURN_TO_STORE',
+          ...dateQuery,
+        });
+        const totalReturned = returns.reduce((sum, ret) => sum + ret.quantity, 0);
+
+        // 6. Scrap breakdown
+        const scrapRecords = await ScrapRecordModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+          status: 'POSTED',
+        });
+
+        const reusableScrap = scrapRecords
+          .filter((s) => s.scrapCategory === 'REUSABLE')
+          .reduce((sum, s) => sum + s.scrapQuantity, 0);
+
+        const saleableScrap = scrapRecords
+          .filter((s) => s.scrapCategory === 'SALEABLE')
+          .reduce((sum, s) => sum + s.scrapQuantity, 0);
+
+        const processLoss = scrapRecords
+          .filter((s) => s.scrapCategory === 'PROCESS_LOSS' || s.scrapCategory === 'REJECTED')
+          .reduce((sum, s) => sum + s.scrapQuantity, 0);
+
+        // 7. Current Store Balances vs WIP Balances
+        const allBalances = await InventoryBalanceModel.find({
+          materialId: matId,
+          ownerType: 'CUSTOMER',
+          customerId: customerObjId,
+        }).populate('warehouseId', 'code name type');
+
+        let closingStoreQuantity = 0;
+        let closingWipQuantity = 0;
+        let totalReserved = 0;
+        let totalAvailable = 0;
+
+        for (const bal of allBalances) {
+          const wh = bal.warehouseId as unknown as { type: string };
+          if (wh?.type === 'WORK_IN_PROGRESS' || wh?.type === 'WIP') {
+            closingWipQuantity += bal.quantityOnHand;
+          } else {
+            closingStoreQuantity += bal.quantityOnHand;
+          }
+          totalReserved += bal.quantityReserved;
+          totalAvailable += bal.quantityAvailable;
+        }
+
+        return {
+          materialId: mat._id,
+          materialCode: mat.code,
+          materialName: mat.name,
+          unit: mat.baseUnit,
+          openingQuantity: Number(openingQuantity.toFixed(4)),
+          receivedQuantity: Number(totalReceived.toFixed(4)),
+          issuedToProductionQuantity: Number(totalIssued.toFixed(4)),
+          actualConsumedQuantity: Number(totalConsumed.toFixed(4)),
+          returnedToStoreQuantity: Number(totalReturned.toFixed(4)),
+          reusableScrapQuantity: Number(reusableScrap.toFixed(4)),
+          saleableScrapQuantity: Number(saleableScrap.toFixed(4)),
+          processLossQuantity: Number(processLoss.toFixed(4)),
+          closingStoreQuantity: Number(closingStoreQuantity.toFixed(4)),
+          closingWipQuantity: Number(closingWipQuantity.toFixed(4)),
+          reservedQuantity: Number(totalReserved.toFixed(4)),
+          availableQuantity: Number(totalAvailable.toFixed(4)),
+          receiptsTraceability: challanBreakdown,
+        };
+      }),
+    );
+
+    // Filter out materials with zero movements and zero balances for clean reporting
+    const activeReport = report.filter(
+      (r) =>
+        r.openingQuantity > 0 ||
+        r.receivedQuantity > 0 ||
+        r.issuedToProductionQuantity > 0 ||
+        r.closingStoreQuantity > 0 ||
+        r.closingWipQuantity > 0,
+    );
+
+    return {
+      customerId: customer._id,
+      customerCode: customer.code,
+      customerName: customer.name,
+      reconciliationDate: new Date(),
+      materials: activeReport,
+    };
+  }
+
+  async getWorkOrderMaterialReconciliation(workOrderId: string) {
+    const workOrder = await WorkOrderModel.findById(workOrderId)
+      .populate('customerId', 'code name')
+      .populate('productId', 'code name');
+
+    if (!workOrder) throw new NotFoundError('Work order not found');
+
+    const customerReconciliation = await this.getCustomerMaterialReconciliation(
+      workOrder.customerId._id.toString(),
+    );
+
+    return {
+      workOrderId: workOrder._id,
+      workOrderNumber: workOrder.workOrderNumber,
+      customer: workOrder.customerId,
+      product: workOrder.productId,
+      reconciliation: customerReconciliation.materials,
+    };
+  }
+
+  async getProductionBatchMaterialReconciliation(batchId: string) {
+    const batch = await ProductionBatchModel.findById(batchId)
+      .populate('productionOrderId')
+      .populate('processStageId');
+
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const [consumptions, returns, scraps] = await Promise.all([
+      MaterialConsumptionModel.find({ productionBatchId: batch._id, status: 'POSTED' }).populate(
+        'materialId',
+        'code name baseUnit',
+      ),
+      MaterialReturnModel.find({ productionBatchId: batch._id, status: 'POSTED' }).populate(
+        'materialId',
+        'code name baseUnit',
+      ),
+      ScrapRecordModel.find({ productionBatchId: batch._id, status: 'POSTED' }).populate(
+        'materialId',
+        'code name baseUnit',
+      ),
+    ]);
+
+    return {
+      batchId: batch._id,
+      batchNumber: batch.batchNumber,
+      status: batch.status,
+      plannedQuantity: batch.plannedQuantity,
+      completedQuantity: batch.completedQuantity,
+      consumptions,
+      returns,
+      scraps,
+    };
+  }
+}
+
+export const productionService = new ProductionService();

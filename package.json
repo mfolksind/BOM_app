@@ -1,0 +1,73 @@
+{
+  "name": "mfolks-erp-backend",
+  "version": "1.0.0",
+  "description": "Cable Manufacturing Job-Work ERP Backend Foundation",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "rimraf dist && tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/integration/models.test.ts",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "docker:mongo": "docker compose up -d mongo",
+    "docker:mongo:down": "docker compose stop mongo",
+    "docker:mongo:logs": "docker compose logs -f mongo",
+    "bootstrap:admin": "tsx src/scripts/bootstrap-super-admin.ts"
+  },
+  "keywords": [
+    "erp",
+    "job-work",
+    "cable-manufacturing",
+    "express",
+    "typescript",
+    "mongodb",
+    "mongoose"
+  ],
+  "author": "Mfolks ERP Team",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.10.1",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.13.4",
+    "@types/supertest": "^6.0.2",
+    "@vitest/coverage-v8": "^3.0.5",
+    "eslint": "^9.20.1",
+    "mongodb-memory-server": "^10.1.4",
+    "prettier": "^3.5.1",
+    "rimraf": "^6.0.1",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

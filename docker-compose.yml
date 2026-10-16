@@ -1,0 +1,77 @@
+# ==============================================================================
+# Docker Compose for Cable Manufacturing Job-Work ERP
+# Sets up MongoDB single-node replica set (rs0) and Express Backend
+# ==============================================================================
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: erp_mongodb
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - erp_network
+    healthcheck:
+      test: >
+        mongosh --port 27017 --quiet --eval "
+          try {
+            const hello = db.hello();
+            if (hello.isWritablePrimary) { quit(0); }
+          } catch(e) {}
+          try {
+            const res = rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
+            if (res.ok === 1 || res.codeName === 'AlreadyInitialized') {
+              const hello = db.hello();
+              if (hello.isWritablePrimary) { quit(0); }
+            }
+          } catch(e) {
+            if (e.codeName === 'AlreadyInitialized') {
+              const hello = db.hello();
+              if (hello.isWritablePrimary) { quit(0); }
+            }
+          }
+          quit(1);
+        "
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: erp_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongo:27017/erp_db?replicaSet=rs0
+      - JWT_ACCESS_SECRET=dev_jwt_access_secret_key_placeholder_min_16_chars
+      - JWT_REFRESH_SECRET=dev_jwt_refresh_secret_key_placeholder_min_16_chars
+      - CORS_ORIGIN=http://localhost:3000,http://localhost:5173
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - erp_network
+
+volumes:
+  mongo_data:
+    name: erp_mongo_data
+
+networks:
+  erp_network:
+    name: erp_network
+    driver: bridge
