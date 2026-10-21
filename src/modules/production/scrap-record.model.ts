@@ -88,20 +88,9 @@ const scrapRecordSchema = new Schema<IScrapRecord>(
     scrapType: {
       type: String,
       required: [true, 'Scrap type is required'],
-      enum: [
-        'COPPER_SCRAP',
-        'ALUMINUM_SCRAP',
-        'PVC_LUMPS',
-        'XLPE_LUMPS',
-        'PROCESS_WASTE',
-        'END_PIECES',
-        'ARMOUR_WIRE_OFFCUTS',
-      ],
     },
     scrapCategory: {
       type: String,
-      required: true,
-      enum: ['REUSABLE', 'SALEABLE', 'PROCESS_LOSS', 'REJECTED'],
       default: 'SALEABLE',
     },
     scrapQuantity: {

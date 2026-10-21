@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+const departmentEnum = z.enum([
+  'MANAGEMENT',
+  'PRODUCTION',
+  'STORES',
+  'QUALITY',
+  'DISPATCH',
+  'MAINTENANCE',
+  'ACCOUNTS',
+]);
+
+export const departmentSchema = z
+  .preprocess(
+    (val) => (typeof val === 'string' ? val.trim().toUpperCase() : val),
+    departmentEnum,
+  )
+  .optional();
+
 export const createAdminSchema = z.object({
   employeeCode: z
     .string()
@@ -15,18 +32,14 @@ export const createAdminSchema = z.object({
   firstName: z.string().trim().min(1, 'First name is required'),
   lastName: z.string().trim().min(1, 'Last name is required'),
   phone: z.string().trim().optional(),
-  department: z
-    .enum(['MANAGEMENT', 'PRODUCTION', 'STORES', 'QUALITY', 'DISPATCH', 'MAINTENANCE', 'ACCOUNTS'])
-    .optional(),
+  department: departmentSchema,
 });
 
 export const updateAdminSchema = z.object({
   firstName: z.string().trim().min(1, 'First name cannot be empty').optional(),
   lastName: z.string().trim().min(1, 'Last name cannot be empty').optional(),
   phone: z.string().trim().optional(),
-  department: z
-    .enum(['MANAGEMENT', 'PRODUCTION', 'STORES', 'QUALITY', 'DISPATCH', 'MAINTENANCE', 'ACCOUNTS'])
-    .optional(),
+  department: departmentSchema,
 });
 
 export const updateAdminStatusSchema = z.object({

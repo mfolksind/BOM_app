@@ -2,6 +2,8 @@
 
 A modular, production-ready backend and comprehensive MongoDB data model layer for a Cable Manufacturing Job-Work Enterprise Resource Planning (ERP) system, built with Node.js, TypeScript, Express.js, MongoDB (Mongoose), and Docker Compose.
 
+> 📖 **Phase 5 Production Workflow Guide:** For the full operational guide on Global Machine selection, multi-material batch consumption, constant auto-scrap calculation, test failure reversal, and automated drum packaging, see [PHASE5_PRODUCTION_WORKFLOW_README.md](file:///e:/Mfolks_BOM/PHASE5_PRODUCTION_WORKFLOW_README.md).
+
 ---
 
 ## 1. Architecture & Technology Stack
@@ -64,6 +66,9 @@ src/
 │   │   └── index.ts
 │   ├── work-orders/
 │   │   ├── work-order.model.ts        # Customer job-work contracts, ordered lengths, rates
+│   │   └── index.ts
+│   ├── machines/
+│   │   ├── machine.model.ts           # Global machine master catalogue, speeds & real-time status
 │   │   └── index.ts
 │   ├── production/
 │   │   ├── production-order.model.ts  # Manufacturing orders derived from work orders

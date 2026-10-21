@@ -140,6 +140,24 @@ export class ProductionController {
     }
   }
 
+  async reverseBatchWork(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await productionService.reverseBatchWork(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Production batch work reversed and machine released successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // ==========================================
   // MATERIAL ISSUES
   // ==========================================
@@ -238,6 +256,24 @@ export class ProductionController {
         success: true,
         statusCode: 200,
         message: 'Material consumptions retrieved successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async recordBatchConsumption(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await productionService.recordBatchConsumption(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Bulk material consumption posted successfully to stock ledger and WIP',
         data: result,
       });
     } catch (err) {
@@ -377,6 +413,28 @@ export class ProductionController {
         success: true,
         statusCode: 200,
         message: 'Scrap records retrieved successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async calculateAndRecordAutoScrap(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const result = await productionService.calculateAndRecordAutoScrap(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Auto-calculated scrap records posted successfully based on BOM constants',
         data: result,
       });
     } catch (err) {

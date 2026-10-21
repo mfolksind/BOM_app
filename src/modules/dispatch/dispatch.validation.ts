@@ -40,34 +40,32 @@ export const updateDispatchSchema = {
   params: z.object({
     id: objectIdSchema,
   }),
-  body: z
-    .object({
-      sourceWarehouseId: objectIdSchema.optional(),
-      destinationAddress: z.string().trim().optional(),
-      vehicleNumber: z.string().trim().optional(),
-      transporter: z.string().trim().optional(),
-      driverName: z.string().trim().optional(),
-      driverPhone: z.string().trim().optional(),
-      lrNumber: z.string().trim().optional(),
-      eWayBillNumber: z.string().trim().optional(),
-      eWayBillDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
-      remarks: z.string().trim().optional(),
-      lines: z
-        .array(
-          z.object({
-            drumId: objectIdSchema,
-            packingListLineId: objectIdSchema.optional(),
-            productId: objectIdSchema.optional(),
-            lengthMeters: z.number().positive().optional(),
-            grossWeightKg: z.number().positive().optional(),
-            tareWeightKg: z.number().min(0).optional(),
-            netWeightKg: z.number().min(0).optional(),
-            remarks: z.string().trim().optional(),
-          }),
-        )
-        .optional(),
-    })
-    .strict(),
+  body: z.object({
+    sourceWarehouseId: objectIdSchema.optional(),
+    destinationAddress: z.string().trim().optional(),
+    vehicleNumber: z.string().trim().optional(),
+    transporter: z.string().trim().optional(),
+    driverName: z.string().trim().optional(),
+    driverPhone: z.string().trim().optional(),
+    lrNumber: z.string().trim().optional(),
+    eWayBillNumber: z.string().trim().optional(),
+    eWayBillDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+    remarks: z.string().trim().optional(),
+    lines: z
+      .array(
+        z.object({
+          drumId: objectIdSchema,
+          packingListLineId: objectIdSchema.optional(),
+          productId: objectIdSchema.optional(),
+          lengthMeters: z.number().positive().optional(),
+          grossWeightKg: z.number().positive().optional(),
+          tareWeightKg: z.number().min(0).optional(),
+          netWeightKg: z.number().min(0).optional(),
+          remarks: z.string().trim().optional(),
+        }),
+      )
+      .optional(),
+  }),
 };
 
 export const listDispatchesQuerySchema = {

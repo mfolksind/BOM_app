@@ -18,6 +18,11 @@ import { InventorySequenceUtil } from '../inventory/inventory-sequence.util';
 import { InventoryAuditUtil } from '../inventory/inventory-audit.util';
 import { InventoryIdempotencyUtil } from '../inventory/inventory-idempotency.util';
 import { StockOwnerType } from '../materials/material-lot.model';
+import { MachineModel } from '../machines/machine.model';
+import { DrumModel } from '../packing/drum.model';
+import { DrumMovementModel } from '../packing/drum-movement.model';
+import { BomItemModel } from '../bom/bom-item.model';
+import { TransactionUtil } from '../../common/utils';
 import { BadRequestError, NotFoundError, ConflictError } from '../../common/errors';
 
 export class ProductionService {
@@ -120,7 +125,9 @@ export class ProductionService {
       plannedLengthMeters: plannedLength,
       producedLengthMeters: 0,
       startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
-      targetCompletionDate: new Date(dto.targetCompletionDate),
+      targetCompletionDate: dto.targetCompletionDate
+        ? new Date(dto.targetCompletionDate)
+        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       status: 'RELEASED',
       releasedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
       releasedAt: new Date(),
@@ -257,10 +264,11 @@ export class ProductionService {
     productionOrderId: string,
     dto: {
       processStageId: string;
-      machineCode: string;
-      plannedQuantity: number;
+      machineId?: string;
+      machineCode?: string;
+      plannedQuantity?: number;
       unit?: string;
-      shift?: 'SHIFT_A' | 'SHIFT_B' | 'SHIFT_C';
+      shift?: string;
       operatorId?: string;
       remarks?: string;
     },
@@ -269,6 +277,18 @@ export class ProductionService {
     const order = await ProductionOrderModel.findById(productionOrderId);
     if (!order) throw new NotFoundError('Production order not found');
 
+    let machineId: mongoose.Types.ObjectId | undefined;
+    let machineCode = (dto.machineCode || 'MACHINE_1').trim().toUpperCase();
+
+    if (dto.machineId) {
+      const machine = await MachineModel.findById(dto.machineId);
+      if (!machine || !machine.isActive) {
+        throw new BadRequestError(`Machine with ID '${dto.machineId}' not found or is inactive`);
+      }
+      machineId = machine._id;
+      machineCode = machine.code;
+    }
+
     const batchNumber = await InventorySequenceUtil.getNextSequence('BATCH', 'BAT');
 
     const batch = await ProductionBatchModel.create({
@@ -276,16 +296,24 @@ export class ProductionService {
       productionOrderId: order._id,
       workOrderId: order.workOrderId,
       processStageId: new mongoose.Types.ObjectId(dto.processStageId),
-      machineCode: dto.machineCode.toUpperCase(),
-      plannedQuantity: dto.plannedQuantity,
+      machineId,
+      machineCode,
+      plannedQuantity: dto.plannedQuantity ?? 0,
       completedQuantity: 0,
       unit: dto.unit || 'METER',
       status: 'IN_PROCESS',
-      shift: dto.shift,
+      shift: dto.shift as never,
       operatorId: dto.operatorId ? new mongoose.Types.ObjectId(dto.operatorId) : undefined,
       startedAt: new Date(),
       remarks: dto.remarks,
     });
+
+    if (machineId) {
+      await MachineModel.findByIdAndUpdate(machineId, {
+        status: 'RUNNING',
+        currentBatchId: batch._id,
+      });
+    }
 
     if (userId) {
       await InventoryAuditUtil.record({
@@ -293,7 +321,7 @@ export class ProductionService {
         entityType: 'ProductionBatch',
         entityId: batch._id,
         performedBy: userId,
-        newValues: { batchNumber, machineCode: dto.machineCode },
+        newValues: { batchNumber, machineCode, machineId },
       });
     }
 
@@ -304,6 +332,7 @@ export class ProductionService {
     const batch = await ProductionBatchModel.findById(id)
       .populate('productionOrderId')
       .populate('processStageId')
+      .populate('machineId')
       .populate('operatorId', 'firstName lastName email employeeCode');
 
     if (!batch) throw new NotFoundError(`Production batch '${id}' not found`);
@@ -322,7 +351,15 @@ export class ProductionService {
     const batch = await ProductionBatchModel.findById(id);
     if (!batch) throw new NotFoundError('Production batch not found');
 
-    if (dto.status) batch.status = dto.status;
+    if (dto.status) {
+      batch.status = dto.status;
+      if (['COMPLETED', 'HALTED', 'REJECTED'].includes(dto.status) && batch.machineId) {
+        await MachineModel.findByIdAndUpdate(batch.machineId, {
+          status: 'AVAILABLE',
+          currentBatchId: null,
+        });
+      }
+    }
     if (dto.completedQuantity !== undefined) batch.completedQuantity = dto.completedQuantity;
     if (dto.remarks !== undefined) batch.remarks = dto.remarks;
     if (dto.status === 'COMPLETED' && !batch.completedAt) batch.completedAt = new Date();
@@ -340,6 +377,127 @@ export class ProductionService {
     }
 
     return batch;
+  }
+
+  async reverseBatchWork(
+    batchId: string,
+    dto: {
+      reason: string;
+      testReportNumber?: string;
+      failedMeasurements?: Record<string, unknown>;
+      returnUnusedWipToStore?: boolean;
+      storeWarehouseId?: string;
+      wipWarehouseId?: string;
+      remarks?: string;
+    },
+    userId?: string,
+  ) {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    if (batch.status === 'REJECTED') {
+      throw new BadRequestError('Production batch is already REJECTED / reversed');
+    }
+
+    batch.status = 'REJECTED';
+    batch.remarks = [batch.remarks, `[REVERSED]: ${dto.reason}`].filter(Boolean).join(' | ');
+    await batch.save();
+
+    if (batch.machineId) {
+      await MachineModel.findByIdAndUpdate(batch.machineId, {
+        status: 'AVAILABLE',
+        currentBatchId: null,
+      });
+    }
+
+    await ProductionOutputModel.updateMany(
+      { productionBatchId: batch._id, status: 'DRAFT' },
+      {
+        qualityStatus: 'REJECTED',
+        remarks: `Work reversed from failed machine. Reason: ${dto.reason}`,
+        testReportNumber: dto.testReportNumber,
+      },
+    );
+
+    const returnedMaterials: Array<{ materialId: string; returnQuantity: number; returnNumber: string }> = [];
+
+    if (dto.returnUnusedWipToStore && dto.storeWarehouseId && dto.wipWarehouseId && batch.workOrderId) {
+      const postedIssues = await MaterialIssueModel.find({
+        workOrderId: batch.workOrderId,
+        status: 'ISSUED',
+      }).select('_id');
+      const issueIds = postedIssues.map((i) => i._id);
+
+      const lines = await MaterialIssueLineModel.find({ materialIssueId: { $in: issueIds } });
+      const uniqueMaterials = new Map<string, { materialId: string; lotId?: string; ownerType: StockOwnerType; customerId?: string }>();
+
+      for (const line of lines) {
+        const key = `${line.materialId.toString()}_${line.lotId ? line.lotId.toString() : 'nolot'}`;
+        if (!uniqueMaterials.has(key)) {
+          uniqueMaterials.set(key, {
+            materialId: line.materialId.toString(),
+            lotId: line.lotId ? line.lotId.toString() : undefined,
+            ownerType: line.ownerType as StockOwnerType,
+            customerId: line.customerId ? line.customerId.toString() : undefined,
+          });
+        }
+      }
+
+      for (const item of uniqueMaterials.values()) {
+        const remainingWip = await this.getRemainingWip({
+          workOrderId: batch.workOrderId,
+          materialId: item.materialId,
+          lotId: item.lotId,
+        });
+
+        if (remainingWip > 0) {
+          const ret = await this.recordMaterialReturn(
+            batchId,
+            {
+              materialId: item.materialId,
+              lotId: item.lotId,
+              ownerType: item.ownerType,
+              customerId: item.customerId,
+              sourceWarehouseId: dto.wipWarehouseId,
+              destinationWarehouseId: dto.storeWarehouseId,
+              returnQuantity: remainingWip,
+              unit: 'KG',
+              reason: `Returned to store after work reversal at machine ${batch.machineCode}: ${dto.reason}`,
+            },
+            userId,
+          );
+          returnedMaterials.push({
+            materialId: item.materialId,
+            returnQuantity: remainingWip,
+            returnNumber: ret.returnNumber,
+          });
+        }
+      }
+    }
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionBatch',
+        entityId: batch._id,
+        performedBy: userId,
+        newValues: {
+          status: 'REJECTED',
+          reversalReason: dto.reason,
+          testReportNumber: dto.testReportNumber,
+          returnedMaterialsCount: returnedMaterials.length,
+        },
+      });
+    }
+
+    return {
+      message: `Production batch '${batch.batchNumber}' work successfully reversed from machine '${batch.machineCode}'`,
+      batchId: batch._id,
+      batchNumber: batch.batchNumber,
+      status: batch.status,
+      machineReleased: !!batch.machineId,
+      returnedMaterials,
+    };
   }
 
   // ==========================================
@@ -475,10 +633,7 @@ export class ProductionService {
       }
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
+    return await TransactionUtil.runInTransaction(async (session) => {
       const issue = await MaterialIssueModel.findById(id).session(session);
       if (!issue) throw new NotFoundError('Material issue not found');
 
@@ -586,14 +741,8 @@ export class ProductionService {
         );
       }
 
-      await session.commitTransaction();
       return responseData;
-    } catch (err) {
-      await session.abortTransaction();
-      throw err;
-    } finally {
-      session.endSession();
-    }
+    });
   }
 
   // ==========================================
@@ -629,10 +778,7 @@ export class ProductionService {
       );
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
+    return await TransactionUtil.runInTransaction(async (session) => {
       // 1. Decrease stock from WIP warehouse
       await inventoryBalanceService.decreaseStock({
         materialId: dto.materialId,
@@ -710,14 +856,8 @@ export class ProductionService {
       consumption[0].inventoryTransactionId = txn[0]._id;
       await consumption[0].save({ session });
 
-      await session.commitTransaction();
       return consumption[0];
-    } catch (err) {
-      await session.abortTransaction();
-      throw err;
-    } finally {
-      session.endSession();
-    }
+    });
   }
 
   async listConsumptions(batchId: string) {
@@ -725,6 +865,75 @@ export class ProductionService {
       .populate('materialId', 'code name baseUnit')
       .populate('lotId', 'lotNumber supplierHeatNumber')
       .sort({ createdAt: -1 });
+  }
+
+  async recordBatchConsumption(
+    batchId: string,
+    dto: {
+      warehouseId?: string;
+      ownerType?: StockOwnerType;
+      items: Array<{
+        materialId: string;
+        lotId?: string;
+        ownerType?: StockOwnerType;
+        customerId?: string;
+        warehouseId?: string;
+        consumedQuantity: number;
+        unit?: string;
+        remarks?: string;
+      }>;
+      autoCalculateScrap?: boolean;
+      scrapWarehouseId?: string;
+    },
+    userId?: string,
+  ) {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const consumptions: IMaterialConsumption[] = [];
+
+    for (const item of dto.items) {
+      const warehouseId = item.warehouseId || dto.warehouseId;
+      if (!warehouseId) {
+        throw new BadRequestError('Warehouse ID is required for material consumption');
+      }
+      const ownerType = item.ownerType || dto.ownerType || 'FACTORY';
+
+      const consumption = await this.recordConsumption(
+        batchId,
+        {
+          materialId: item.materialId,
+          lotId: item.lotId,
+          ownerType,
+          customerId: item.customerId,
+          warehouseId,
+          consumedQuantity: item.consumedQuantity,
+          unit: item.unit || 'KG',
+          remarks: item.remarks,
+        },
+        userId,
+      );
+      consumptions.push(consumption);
+    }
+
+    let autoGeneratedScrap: IScrapRecord[] = [];
+    if (dto.autoCalculateScrap && dto.scrapWarehouseId) {
+      autoGeneratedScrap = await this.calculateAndRecordAutoScrap(
+        batchId,
+        {
+          scrapWarehouseId: dto.scrapWarehouseId,
+          reason: 'Auto-calculated scrap from bulk consumption using BOM tolerance constants',
+        },
+        userId,
+      );
+    }
+
+    return {
+      batchId: batch._id,
+      batchNumber: batch.batchNumber,
+      consumptions,
+      autoGeneratedScrap,
+    };
   }
 
   // ==========================================
@@ -972,6 +1181,47 @@ export class ProductionService {
         );
       }
 
+      // If passed and assigned to a drum, update drum details and log packing movement
+      if (output.qualityStatus === 'PASSED' && output.drumId) {
+        const drum = await DrumModel.findById(output.drumId).session(session);
+        if (drum) {
+          const grossWeight = Number((drum.tareWeightKg + output.outputWeightKg).toFixed(4));
+          drum.cableLengthMeters = output.outputLengthMeters;
+          drum.netWeightKg = output.outputWeightKg;
+          drum.grossWeightKg = grossWeight;
+          drum.status = 'FILLED';
+          drum.currentWarehouseId = output.targetWarehouseId;
+          drum.currentProductId = output.productId;
+          drum.workOrderId = output.workOrderId;
+          drum.productionOrderId = output.productionOrderId;
+          drum.productionBatchId = output.productionBatchId;
+          drum.productionOutputId = output._id;
+          await drum.save({ session });
+
+          const movementNumber = await InventorySequenceUtil.getNextSequence(
+            'DRUM_MOVEMENT',
+            'DM',
+            session,
+          );
+          await DrumMovementModel.create(
+            [
+              {
+                movementNumber,
+                drumId: drum._id,
+                movementType: 'PACKING',
+                toWarehouseId: output.targetWarehouseId,
+                referenceDocumentType: 'ProductionOutput',
+                referenceDocumentId: output._id,
+                movedAt: new Date(),
+                recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+                remarks: `Packaged cable output (${output.outputLengthMeters}m) into drum ${drum.drumNumber}`,
+              },
+            ],
+            { session },
+          );
+        }
+      }
+
       output.status = 'POSTED';
       output.postedAt = new Date();
       if (userId) output.postedBy = new mongoose.Types.ObjectId(userId);
@@ -1028,10 +1278,7 @@ export class ProductionService {
       );
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
+    return await TransactionUtil.runInTransaction(async (session) => {
       // 1. Decrease from WIP warehouse
       await inventoryBalanceService.decreaseStock({
         materialId: dto.materialId,
@@ -1122,14 +1369,8 @@ export class ProductionService {
       scrap[0].inventoryTransactionId = txn[0]._id;
       await scrap[0].save({ session });
 
-      await session.commitTransaction();
       return scrap[0];
-    } catch (err) {
-      await session.abortTransaction();
-      throw err;
-    } finally {
-      session.endSession();
-    }
+    });
   }
 
   async listScrapRecords(batchId: string) {
@@ -1137,6 +1378,96 @@ export class ProductionService {
       .populate('materialId', 'code name baseUnit')
       .populate('scrapWarehouseId', 'code name')
       .sort({ createdAt: -1 });
+  }
+
+  async calculateAndRecordAutoScrap(
+    batchId: string,
+    dto: {
+      scrapWarehouseId: string;
+      sourceWarehouseId?: string;
+      reason?: string;
+    },
+    userId?: string,
+  ): Promise<IScrapRecord[]> {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const order = await ProductionOrderModel.findById(batch.productionOrderId);
+    if (!order) throw new NotFoundError('Production order not found');
+
+    const consumptions = await MaterialConsumptionModel.find({
+      productionBatchId: batch._id,
+      status: 'POSTED',
+    });
+
+    if (!consumptions.length) {
+      throw new BadRequestError(
+        'No posted material consumptions found for this batch to calculate scrap',
+      );
+    }
+
+    const existingScraps = await ScrapRecordModel.find({
+      productionBatchId: batch._id,
+      status: 'POSTED',
+    });
+    const scrappedMaterialIds = new Set(existingScraps.map((s) => s.materialId.toString()));
+
+    const scrapRecords: IScrapRecord[] = [];
+
+    for (const c of consumptions) {
+      if (scrappedMaterialIds.has(c.materialId.toString())) {
+        continue;
+      }
+
+      const bomItem = await BomItemModel.findOne({
+        bomVersionId: order.bomVersionId,
+        materialId: c.materialId,
+      });
+
+      const scrapTolerance = bomItem?.scrapTolerancePercentage ?? 0;
+      if (scrapTolerance <= 0) continue;
+
+      const calculatedScrapQty = Number(
+        ((c.consumedQuantity * scrapTolerance) / 100).toFixed(4),
+      );
+      if (calculatedScrapQty <= 0) continue;
+
+      const sourceWarehouseId = dto.sourceWarehouseId || c.warehouseId.toString();
+
+      const remainingWip = await this.getRemainingWip({
+        workOrderId: batch.workOrderId!,
+        materialId: c.materialId,
+        lotId: c.lotId ? c.lotId.toString() : undefined,
+      });
+
+      const actualScrapQty = Math.min(calculatedScrapQty, remainingWip);
+      if (actualScrapQty <= 0) continue;
+
+      const scrap = await this.recordScrap(
+        batchId,
+        {
+          materialId: c.materialId.toString(),
+          lotId: c.lotId ? c.lotId.toString() : undefined,
+          ownerType: c.ownerType as StockOwnerType,
+          customerId: c.customerId ? c.customerId.toString() : undefined,
+          scrapType: 'PROCESS_LOSS',
+          scrapCategory: 'SALEABLE',
+          scrapQuantity: actualScrapQty,
+          unit: c.unit,
+          sourceWarehouseId,
+          scrapWarehouseId: dto.scrapWarehouseId,
+          reason:
+            dto.reason ||
+            `Auto-calculated scrap based on BOM constant (${scrapTolerance}%)`,
+        },
+        userId,
+      );
+
+      scrapRecords.push(scrap);
+      scrappedMaterialIds.add(c.materialId.toString());
+    }
+
+    return scrapRecords;
   }
 
   // ==========================================

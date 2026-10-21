@@ -148,7 +148,6 @@ const workOrderSchema = new Schema<IWorkOrder>(
     },
     targetDeliveryDate: {
       type: Date,
-      required: [true, 'Target delivery date is required'],
     },
     plannedStartDate: {
       type: Date,

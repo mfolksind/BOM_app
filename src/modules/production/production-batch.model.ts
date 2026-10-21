@@ -9,6 +9,7 @@ export interface IProductionBatch extends Document {
   productionOrderId: mongoose.Types.ObjectId;
   workOrderId?: mongoose.Types.ObjectId;
   processStageId: mongoose.Types.ObjectId;
+  machineId?: mongoose.Types.ObjectId;
   machineCode: string;
   operatorId?: mongoose.Types.ObjectId;
   plannedQuantity: number;
@@ -46,9 +47,13 @@ const productionBatchSchema = new Schema<IProductionBatch>(
       ref: 'ProcessStage',
       required: [true, 'Process Stage reference is required'],
     },
+    machineId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Machine',
+    },
     machineCode: {
       type: String,
-      required: [true, 'Machine code is required'],
+      default: 'MACHINE_1',
       trim: true,
       uppercase: true,
     },
@@ -58,8 +63,8 @@ const productionBatchSchema = new Schema<IProductionBatch>(
     },
     plannedQuantity: {
       type: Number,
-      required: [true, 'Planned quantity is required'],
-      min: [0.000001, 'Planned quantity must be positive'],
+      default: 0,
+      min: [0, 'Planned quantity cannot be negative'],
     },
     completedQuantity: {
       type: Number,
@@ -74,12 +79,10 @@ const productionBatchSchema = new Schema<IProductionBatch>(
     status: {
       type: String,
       required: true,
-      enum: ['PENDING', 'IN_PROCESS', 'COMPLETED', 'HALTED', 'REJECTED'],
       default: 'PENDING',
     },
     shift: {
       type: String,
-      enum: ['SHIFT_A', 'SHIFT_B', 'SHIFT_C'],
     },
     startedAt: {
       type: Date,

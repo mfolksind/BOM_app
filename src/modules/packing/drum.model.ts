@@ -58,7 +58,6 @@ const drumSchema = new Schema<IDrum>(
     drumType: {
       type: String,
       required: [true, 'Drum type is required'],
-      enum: ['WOODEN', 'STEEL', 'PLASTIC'],
       default: 'WOODEN',
     },
     serialNumber: {
@@ -80,8 +79,8 @@ const drumSchema = new Schema<IDrum>(
     },
     tareWeightKg: {
       type: Number,
-      required: [true, 'Drum tare weight is required'],
-      min: [0.001, 'Tare weight must be greater than 0'],
+      default: 0,
+      min: [0, 'Tare weight cannot be negative'],
     },
     grossWeightKg: {
       type: Number,
@@ -150,8 +149,6 @@ const drumSchema = new Schema<IDrum>(
     },
     ownership: {
       type: String,
-      required: true,
-      enum: ['FACTORY_OWNED', 'CUSTOMER_SUPPLIED'],
       default: 'FACTORY_OWNED',
     },
     customerId: {

@@ -53,20 +53,11 @@ const productSchema = new Schema<IProduct>(
     cableCategory: {
       type: String,
       required: [true, 'Cable category is required'],
-      enum: [
-        'HT_POWER',
-        'LT_POWER',
-        'CONTROL',
-        'INSTRUMENTATION',
-        'SOLAR',
-        'HOUSE_WIRE',
-        'SUBMERSIBLE',
-      ],
+      default: 'LT_POWER',
     },
     voltageGrade: {
       type: String,
       required: [true, 'Voltage grade is required'],
-      enum: ['1.1KV', '3.3KV', '6.6KV', '11KV', '22KV', '33KV'],
       default: '1.1KV',
     },
     coreCount: {
@@ -82,23 +73,21 @@ const productSchema = new Schema<IProduct>(
     conductorMaterial: {
       type: String,
       required: [true, 'Conductor material is required'],
-      enum: ['COPPER', 'ALUMINUM'],
+      default: 'COPPER',
     },
     insulationType: {
       type: String,
       required: [true, 'Insulation type is required'],
-      enum: ['PVC', 'XLPE'],
+      default: 'PVC',
     },
     armourType: {
       type: String,
       required: [true, 'Armour type is required'],
-      enum: ['UNARMOURED', 'ROUND_WIRE_ARMOURED', 'STRIP_ARMOURED', 'DOUBLE_STEEL_TAPE'],
       default: 'UNARMOURED',
     },
     outerSheath: {
       type: String,
       required: [true, 'Outer sheath type is required'],
-      enum: ['PVC_ST1', 'PVC_ST2', 'FRLS', 'ZHFR'],
       default: 'PVC_ST1',
     },
     standardSpecification: {

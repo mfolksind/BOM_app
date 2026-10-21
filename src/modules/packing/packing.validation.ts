@@ -6,7 +6,7 @@ const objectIdSchema = z.string().regex(objectIdRegex, 'Invalid ObjectId');
 export const createDrumSchema = {
   body: z.object({
     drumNumber: z.string().trim().toUpperCase().optional(),
-    drumType: z.enum(['WOODEN', 'STEEL', 'PLASTIC']).default('WOODEN'),
+    drumType: z.string().trim().default('WOODEN'),
     serialNumber: z.string().trim().toUpperCase().optional(),
     flangeDiameterMm: z.number().min(0).optional(),
     barrelDiameterMm: z.number().min(0).optional(),
@@ -23,23 +23,8 @@ export const createDrumSchema = {
     customerId: objectIdSchema.optional(),
     currentWarehouseId: objectIdSchema.optional(),
     location: z.string().trim().optional(),
-    ownership: z.enum(['FACTORY_OWNED', 'CUSTOMER_SUPPLIED']).default('FACTORY_OWNED'),
-    status: z
-      .enum([
-        'EMPTY',
-        'AVAILABLE',
-        'WINDING',
-        'FILLED',
-        'PACKED',
-        'IN_TRANSIT',
-        'DISPATCHED',
-        'CUSTOMER_SITE',
-        'RETURNED',
-        'DAMAGED',
-        'SCRAPPED',
-        'CANCELLED',
-      ])
-      .default('AVAILABLE'),
+    ownership: z.string().trim().default('FACTORY_OWNED'),
+    status: z.string().trim().default('AVAILABLE'),
     remarks: z.string().trim().optional(),
   }),
 };
@@ -48,64 +33,32 @@ export const updateDrumSchema = {
   params: z.object({
     id: objectIdSchema,
   }),
-  body: z
-    .object({
-      drumType: z.enum(['WOODEN', 'STEEL', 'PLASTIC']).optional(),
-      serialNumber: z.string().trim().toUpperCase().optional(),
-      flangeDiameterMm: z.number().min(0).optional(),
-      barrelDiameterMm: z.number().min(0).optional(),
-      traverseWidthMm: z.number().min(0).optional(),
-      tareWeightKg: z.number().positive().optional(),
-      grossWeightKg: z.number().min(0).optional(),
-      netWeightKg: z.number().min(0).optional(),
-      cableLengthMeters: z.number().min(0).optional(),
-      currentProductId: objectIdSchema.optional(),
-      workOrderId: objectIdSchema.optional(),
-      customerId: objectIdSchema.optional(),
-      currentWarehouseId: objectIdSchema.optional(),
-      location: z.string().trim().optional(),
-      status: z
-        .enum([
-          'EMPTY',
-          'AVAILABLE',
-          'WINDING',
-          'FILLED',
-          'PACKED',
-          'IN_TRANSIT',
-          'DISPATCHED',
-          'CUSTOMER_SITE',
-          'RETURNED',
-          'DAMAGED',
-          'SCRAPPED',
-          'CANCELLED',
-        ])
-        .optional(),
-      remarks: z.string().trim().optional(),
-    })
-    .strict(),
+  body: z.object({
+    drumType: z.string().trim().optional(),
+    serialNumber: z.string().trim().toUpperCase().optional(),
+    flangeDiameterMm: z.number().min(0).optional(),
+    barrelDiameterMm: z.number().min(0).optional(),
+    traverseWidthMm: z.number().min(0).optional(),
+    tareWeightKg: z.number().positive().optional(),
+    grossWeightKg: z.number().min(0).optional(),
+    netWeightKg: z.number().min(0).optional(),
+    cableLengthMeters: z.number().min(0).optional(),
+    currentProductId: objectIdSchema.optional(),
+    workOrderId: objectIdSchema.optional(),
+    customerId: objectIdSchema.optional(),
+    currentWarehouseId: objectIdSchema.optional(),
+    location: z.string().trim().optional(),
+    status: z.string().trim().optional(),
+    remarks: z.string().trim().optional(),
+  }),
 };
 
 export const listDrumsQuerySchema = {
   query: z.object({
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(20),
-    status: z
-      .enum([
-        'EMPTY',
-        'AVAILABLE',
-        'WINDING',
-        'FILLED',
-        'PACKED',
-        'IN_TRANSIT',
-        'DISPATCHED',
-        'CUSTOMER_SITE',
-        'RETURNED',
-        'DAMAGED',
-        'SCRAPPED',
-        'CANCELLED',
-      ])
-      .optional(),
-    drumType: z.enum(['WOODEN', 'STEEL', 'PLASTIC']).optional(),
+    status: z.string().trim().optional(),
+    drumType: z.string().trim().optional(),
     currentProductId: objectIdSchema.optional(),
     workOrderId: objectIdSchema.optional(),
     customerId: objectIdSchema.optional(),
@@ -151,29 +104,27 @@ export const updatePackingListSchema = {
   params: z.object({
     id: objectIdSchema,
   }),
-  body: z
-    .object({
-      packingWarehouseId: objectIdSchema.optional(),
-      packingDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
-      remarks: z.string().trim().optional(),
-      lines: z
-        .array(
-          z.object({
-            drumId: objectIdSchema,
-            productId: objectIdSchema.optional(),
-            lengthMeters: z.number().positive().optional(),
-            tareWeightKg: z.number().positive().optional(),
-            netWeightKg: z.number().positive().optional(),
-            grossWeightKg: z.number().positive().optional(),
-            conductorResistanceOhmPerKm: z.number().min(0).optional(),
-            insulationResistanceMOhmKm: z.number().min(0).optional(),
-            highVoltageTestPassed: z.boolean().default(true),
-            remarks: z.string().trim().optional(),
-          }),
-        )
-        .optional(),
-    })
-    .strict(),
+  body: z.object({
+    packingWarehouseId: objectIdSchema.optional(),
+    packingDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+    remarks: z.string().trim().optional(),
+    lines: z
+      .array(
+        z.object({
+          drumId: objectIdSchema,
+          productId: objectIdSchema.optional(),
+          lengthMeters: z.number().positive().optional(),
+          tareWeightKg: z.number().positive().optional(),
+          netWeightKg: z.number().positive().optional(),
+          grossWeightKg: z.number().positive().optional(),
+          conductorResistanceOhmPerKm: z.number().min(0).optional(),
+          insulationResistanceMOhmKm: z.number().min(0).optional(),
+          highVoltageTestPassed: z.boolean().default(true),
+          remarks: z.string().trim().optional(),
+        }),
+      )
+      .optional(),
+  }),
 };
 
 export const listPackingListsQuerySchema = {

@@ -12,6 +12,9 @@ import {
   createMaterialReturnSchema,
   createProductionOutputSchema,
   createScrapRecordSchema,
+  createBulkMaterialConsumptionSchema,
+  autoScrapSchema,
+  reverseBatchSchema,
 } from './production.validation';
 
 // ==========================================
@@ -76,6 +79,12 @@ batchesRouter.post(
   productionController.recordConsumption.bind(productionController),
 );
 
+batchesRouter.post(
+  '/:id/consumptions/bulk',
+  validateRequest(createBulkMaterialConsumptionSchema),
+  productionController.recordBatchConsumption.bind(productionController),
+);
+
 batchesRouter.get(
   '/:id/consumption',
   productionController.listConsumptions.bind(productionController),
@@ -107,6 +116,18 @@ batchesRouter.post(
   '/:id/scrap',
   validateRequest(createScrapRecordSchema),
   productionController.recordScrap.bind(productionController),
+);
+
+batchesRouter.post(
+  '/:id/auto-scrap',
+  validateRequest(autoScrapSchema),
+  productionController.calculateAndRecordAutoScrap.bind(productionController),
+);
+
+batchesRouter.post(
+  '/:id/reverse',
+  validateRequest(reverseBatchSchema),
+  productionController.reverseBatchWork.bind(productionController),
 );
 
 batchesRouter.get('/:id/scrap', productionController.listScrapRecords.bind(productionController));

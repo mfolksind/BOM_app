@@ -50,8 +50,8 @@ export class TransactionUtil {
       }
     }
 
-    // Check MongoDB error code 112 (WriteConflict)
-    if (maybeObj.code === 112) return true;
+    // Check MongoDB error code 112 (WriteConflict) or 24 (LockTimeout)
+    if (maybeObj.code === 112 || maybeObj.code === 24) return true;
 
     // Check error message for WriteConflict
     if (
@@ -119,6 +119,20 @@ export class TransactionUtil {
 
             await new Promise((resolve) => setTimeout(resolve, totalDelay));
             continue;
+          }
+
+          // If standalone MongoDB instance is detected (Code 20), fallback gracefully without transactions
+          if (
+            (error as { code?: number })?.code === 20 ||
+            (typeof (error as { message?: string })?.message === 'string' &&
+              (error as { message: string }).message.includes(
+                'Transaction numbers are only allowed on a replica set member or mongos',
+              ))
+          ) {
+            logger.warn(
+              'Standalone MongoDB detected (replica set not configured). Executing operation in standalone fallback mode for local development.',
+            );
+            return await operation(undefined as unknown as ClientSession);
           }
 
           // Non-transient error or retries exhausted: rethrow immediately

@@ -1,15 +1,7 @@
 import { z } from 'zod';
 import mongoose from 'mongoose';
 
-export const warehouseTypeEnum = z.enum([
-  'RAW_MATERIAL',
-  'WORK_IN_PROGRESS',
-  'FINISHED_GOODS',
-  'SCRAP',
-  'PACKING_MATERIAL',
-  'CUSTOMER_SUPPLIED',
-  'QUARANTINE',
-]);
+export const warehouseTypeEnum = z.string().trim();
 
 const objectIdValidator = z.string().refine((val) => mongoose.Types.ObjectId.isValid(val), {
   message: 'Invalid ObjectId format',
@@ -24,7 +16,7 @@ export const createWarehouseSchema = z.object({
     .trim()
     .transform((val) => val.toUpperCase()),
   name: z.string().min(2, 'Warehouse name must be at least 2 characters').max(100).trim(),
-  type: warehouseTypeEnum.default('RAW_MATERIAL'),
+  type: warehouseTypeEnum.default('RAW_MATERIAL').optional(),
   description: z.string().max(1000).trim().optional(),
   location: z.string().max(200).trim().optional(),
   address: z.string().max(500).trim().optional(),
@@ -33,17 +25,15 @@ export const createWarehouseSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export const updateWarehouseSchema = z
-  .object({
-    name: z.string().min(2).max(100).trim().optional(),
-    type: warehouseTypeEnum.optional(),
-    description: z.string().max(1000).trim().optional(),
-    location: z.string().max(200).trim().optional(),
-    address: z.string().max(500).trim().optional(),
-    managerId: objectIdValidator.nullable().optional(),
-    capacity: z.coerce.number().min(0, 'Capacity cannot be negative').optional(),
-  })
-  .strict();
+export const updateWarehouseSchema = z.object({
+  name: z.string().min(2).max(100).trim().optional(),
+  type: warehouseTypeEnum.optional(),
+  description: z.string().max(1000).trim().optional(),
+  location: z.string().max(200).trim().optional(),
+  address: z.string().max(500).trim().optional(),
+  managerId: objectIdValidator.nullable().optional(),
+  capacity: z.coerce.number().min(0, 'Capacity cannot be negative').optional(),
+});
 
 export const updateWarehouseStatusSchema = z.object({
   isActive: z.boolean(),

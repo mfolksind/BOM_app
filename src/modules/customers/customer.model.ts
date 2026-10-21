@@ -68,7 +68,6 @@ const customerSchema = new Schema<ICustomer>(
     },
     contactPerson: {
       type: String,
-      required: [true, 'Contact person name is required'],
       trim: true,
     },
     email: {

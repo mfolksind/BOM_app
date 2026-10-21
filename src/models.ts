@@ -33,3 +33,6 @@ export * from './modules/packing';
 
 // Transport, Dispatches, & Outbound Challans
 export * from './modules/dispatch';
+
+// Global Factory Machine Master
+export * from './modules/machines';

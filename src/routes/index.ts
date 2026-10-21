@@ -8,6 +8,7 @@ import { productRoutes } from '../modules/products';
 import { bomRoutes } from '../modules/bom';
 import { warehouseRoutes } from '../modules/warehouses';
 import { processStageRoutes } from '../modules/process-stages';
+import { machineRoutes } from '../modules/machines';
 import {
   inventoryRoutes,
   inboundChallanRoutes,
@@ -46,6 +47,7 @@ router.use('/products', productRoutes);
 router.use('/boms', bomRoutes);
 router.use('/warehouses', warehouseRoutes);
 router.use('/process-stages', processStageRoutes);
+router.use('/machines', machineRoutes);
 
 // Inventory Management & Stock Ledger (Prompt 5)
 router.use('/inventory', inventoryRoutes);

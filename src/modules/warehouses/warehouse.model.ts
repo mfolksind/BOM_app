@@ -40,15 +40,6 @@ const warehouseSchema = new Schema<IWarehouse>(
     type: {
       type: String,
       required: [true, 'Warehouse type is required'],
-      enum: [
-        'RAW_MATERIAL',
-        'WORK_IN_PROGRESS',
-        'FINISHED_GOODS',
-        'SCRAP',
-        'PACKING_MATERIAL',
-        'CUSTOMER_SUPPLIED',
-        'QUARANTINE',
-      ],
       default: 'RAW_MATERIAL',
     },
     description: {

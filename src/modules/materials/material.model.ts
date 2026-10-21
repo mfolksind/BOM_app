@@ -52,19 +52,7 @@ const materialSchema = new Schema<IMaterial>(
     },
     category: {
       type: String,
-      required: [true, 'Material category is required'],
-      enum: [
-        'COPPER',
-        'ALUMINUM',
-        'PVC_COMPOUND',
-        'XLPE_COMPOUND',
-        'MASTERBATCH',
-        'GI_WIRE_STRIP',
-        'TAPE_BINDING',
-        'PACKING_MATERIAL',
-        'CHEMICAL_SOLVENT',
-        'OTHER',
-      ],
+      required: [true, 'Material category is required']
     },
     baseUnit: {
       type: String,

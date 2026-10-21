@@ -15,14 +15,12 @@ export const createProcessStageSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export const updateProcessStageSchema = z
-  .object({
-    name: z.string().min(2).max(100).trim().optional(),
-    sequenceOrder: z.coerce.number().int().min(1).optional(),
-    category: z.string().max(50).trim().optional(),
-    description: z.string().max(1000).trim().optional(),
-  })
-  .strict();
+export const updateProcessStageSchema = z.object({
+  name: z.string().min(2).max(100).trim().optional(),
+  sequenceOrder: z.coerce.number().int().min(1).optional(),
+  category: z.string().max(50).trim().optional(),
+  description: z.string().max(1000).trim().optional(),
+});
 
 export const updateProcessStageStatusSchema = z.object({
   isActive: z.boolean(),

@@ -10,6 +10,7 @@ import { inventoryBalanceService } from './inventory-balance.service';
 import { InventorySequenceUtil } from './inventory-sequence.util';
 import { InventoryIdempotencyUtil } from './inventory-idempotency.util';
 import { InventoryAuditUtil } from './inventory-audit.util';
+import { TransactionUtil } from '../../common/utils';
 import { BadRequestError, NotFoundError, ConflictError } from '../../common/errors';
 import {
   CreateInboundChallanInput,
@@ -19,6 +20,14 @@ import {
 } from './inbound-challans.validation';
 
 export class InboundChallansService {
+  private validateId(id: string): mongoose.Types.ObjectId {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new BadRequestError(
+        `Invalid Inbound Challan ID format: '${id}'. Expected a 24-character hex ObjectId. If using Postman, please verify that your environment variable (e.g. {{challan1_id}}) is set with a valid ID.`,
+      );
+    }
+    return new mongoose.Types.ObjectId(id);
+  }
   /**
    * Create a Draft Inbound Challan with multiple lines.
    * Does NOT alter inventory stock.
@@ -118,7 +127,8 @@ export class InboundChallansService {
    * Get Challan by ID with populated lines and references
    */
   async getById(id: string) {
-    const challan = await InboundChallanModel.findById(id)
+    const objectId = this.validateId(id);
+    const challan = await InboundChallanModel.findById(objectId)
       .populate('customerId', 'name code')
       .populate('warehouseId', 'name code')
       .populate('receivedBy', 'firstName lastName employeeCode')
@@ -207,7 +217,8 @@ export class InboundChallansService {
     ipAddress?: string,
     userAgent?: string,
   ) {
-    const challan = await InboundChallanModel.findById(id);
+    const objectId = this.validateId(id);
+    const challan = await InboundChallanModel.findById(objectId);
     if (!challan) {
       throw new NotFoundError(`Inbound Challan with ID '${id}' not found`);
     }
@@ -267,7 +278,8 @@ export class InboundChallansService {
    * Cancel a DRAFT Challan without affecting stock
    */
   async cancelDraft(id: string, userId: string, ipAddress?: string, userAgent?: string) {
-    const challan = await InboundChallanModel.findById(id);
+    const objectId = this.validateId(id);
+    const challan = await InboundChallanModel.findById(objectId);
     if (!challan) {
       throw new NotFoundError(`Inbound Challan with ID '${id}' not found`);
     }
@@ -314,8 +326,10 @@ export class InboundChallansService {
       }
     }
 
+    const objectId = this.validateId(id);
+
     // Verify challan exists and is in DRAFT
-    const existingChallan = await InboundChallanModel.findById(id);
+    const existingChallan = await InboundChallanModel.findById(objectId);
     if (!existingChallan) {
       throw new NotFoundError(`Inbound Challan with ID '${id}' not found`);
     }
@@ -335,149 +349,141 @@ export class InboundChallansService {
       throw new BadRequestError('Cannot post an inbound challan with no line items');
     }
 
-    // Execute atomic posting inside MongoDB session transaction
-    const session = await mongoose.startSession();
-    let result: unknown;
-
-    try {
-      await session.withTransaction(async () => {
-        // 1. Atomically lock and update status from DRAFT to POSTED
-        const lockedChallan = await InboundChallanModel.findOneAndUpdate(
-          { _id: existingChallan._id, status: 'DRAFT' },
-          {
-            $set: {
-              status: 'POSTED',
-              postedBy: new mongoose.Types.ObjectId(userId),
-              postedAt: new Date(),
-            },
+    return await TransactionUtil.runInTransaction(async (session) => {
+      // 1. Atomically lock and update status from DRAFT to POSTED
+      const lockedChallan = await InboundChallanModel.findOneAndUpdate(
+        { _id: existingChallan._id, status: 'DRAFT' },
+        {
+          $set: {
+            status: 'POSTED',
+            postedBy: new mongoose.Types.ObjectId(userId),
+            postedAt: new Date(),
           },
-          { session, new: true },
+        },
+        { ...(session ? { session } : {}), new: true },
+      );
+
+      if (!lockedChallan) {
+        throw new ConflictError(
+          `Inbound Challan '${existingChallan.challanNumber}' was already posted concurrently`,
+        );
+      }
+
+      // 2. Process each line item
+      for (const line of lines) {
+        // Generate unique Lot Number
+        const lotNumber = await InventorySequenceUtil.getNextSequence(
+          'MATERIAL_LOT',
+          'LOT',
+          session,
         );
 
-        if (!lockedChallan) {
-          throw new ConflictError(
-            `Inbound Challan '${existingChallan.challanNumber}' was already posted concurrently`,
-          );
-        }
+        // Create traceable Material Lot
+        const [lot] = await MaterialLotModel.create(
+          [
+            {
+              lotNumber,
+              materialId: line.materialId,
+              warehouseId: lockedChallan.warehouseId,
+              ownerType: lockedChallan.ownerType,
+              customerId: lockedChallan.customerId,
+              inboundChallanId: lockedChallan._id,
+              inboundChallanLineId: line._id,
+              supplierLotNumber: line.supplierLotNumber,
+              initialQuantity: line.receivedQuantity,
+              currentBalance: line.receivedQuantity,
+              unit: line.unit,
+              receivedDate: new Date(),
+              qualityStatus: 'APPROVED',
+            },
+          ],
+          { ...(session ? { session } : {}) },
+        );
 
-        // 2. Process each line item
-        for (const line of lines) {
-          // Generate unique Lot Number
-          const lotNumber = await InventorySequenceUtil.getNextSequence(
-            'MATERIAL_LOT',
-            'LOT',
-            session,
-          );
+        // Update Challan Line with created lot reference
+        line.lotId = lot._id;
+        line.qualityStatus = 'APPROVED';
+        await line.save({ ...(session ? { session } : {}) });
 
-          // Create traceable Material Lot
-          const [lot] = await MaterialLotModel.create(
-            [
-              {
-                lotNumber,
-                materialId: line.materialId,
-                warehouseId: lockedChallan.warehouseId,
-                ownerType: lockedChallan.ownerType,
-                customerId: lockedChallan.customerId,
-                inboundChallanId: lockedChallan._id,
-                inboundChallanLineId: line._id,
-                supplierLotNumber: line.supplierLotNumber,
-                initialQuantity: line.receivedQuantity,
-                currentBalance: line.receivedQuantity,
-                unit: line.unit,
-                receivedDate: new Date(),
-                qualityStatus: 'APPROVED',
-              },
-            ],
-            { session },
-          );
+        // Generate Transaction Number
+        const transactionNumber = await InventorySequenceUtil.getNextSequence(
+          'INVENTORY_TRANSACTION',
+          'TXN',
+          session,
+        );
 
-          // Update Challan Line with created lot reference
-          line.lotId = lot._id;
-          line.qualityStatus = 'APPROVED';
-          await line.save({ session });
+        // Create Immutable Inventory Transaction
+        const [txn] = await InventoryTransactionModel.create(
+          [
+            {
+              transactionNumber,
+              movementType: 'INWARD',
+              transactionType: 'RECEIPT',
+              materialId: line.materialId,
+              warehouseId: lockedChallan.warehouseId,
+              lotId: lot._id,
+              ownerType: lockedChallan.ownerType,
+              customerId: lockedChallan.customerId,
+              quantity: line.receivedQuantity,
+              unit: line.unit,
+              status: 'POSTED',
+              sourceDocumentType: 'INBOUND_CHALLAN',
+              sourceDocumentId: lockedChallan._id,
+              sourceDocumentLineId: line._id,
+              postedAt: new Date(),
+              postedBy: new mongoose.Types.ObjectId(userId),
+              remarks: input.remarks || `Posted from Challan ${lockedChallan.challanNumber}`,
+            },
+          ],
+          { ...(session ? { session } : {}) },
+        );
 
-          // Generate Transaction Number
-          const transactionNumber = await InventorySequenceUtil.getNextSequence(
-            'INVENTORY_TRANSACTION',
-            'TXN',
-            session,
-          );
-
-          // Create Immutable Inventory Transaction
-          const [txn] = await InventoryTransactionModel.create(
-            [
-              {
-                transactionNumber,
-                movementType: 'INWARD',
-                transactionType: 'RECEIPT',
-                materialId: line.materialId,
-                warehouseId: lockedChallan.warehouseId,
-                lotId: lot._id,
-                ownerType: lockedChallan.ownerType,
-                customerId: lockedChallan.customerId,
-                quantity: line.receivedQuantity,
-                unit: line.unit,
-                status: 'POSTED',
-                sourceDocumentType: 'INBOUND_CHALLAN',
-                sourceDocumentId: lockedChallan._id,
-                sourceDocumentLineId: line._id,
-                postedAt: new Date(),
-                postedBy: new mongoose.Types.ObjectId(userId),
-                remarks: input.remarks || `Posted from Challan ${lockedChallan.challanNumber}`,
-              },
-            ],
-            { session },
-          );
-
-          // Atomically update inventory balance projection
-          await inventoryBalanceService.increaseStock({
-            materialId: line.materialId,
-            warehouseId: lockedChallan.warehouseId,
-            ownerType: lockedChallan.ownerType,
-            customerId: lockedChallan.customerId,
-            lotId: lot._id,
-            quantity: line.receivedQuantity,
-            unit: line.unit,
-            transactionId: txn._id,
-            session,
-          });
-        }
-
-        // 3. Record Audit Log inside transaction
-        await InventoryAuditUtil.record({
-          action: 'POST',
-          entityType: 'InboundChallan',
-          entityId: lockedChallan._id,
-          performedBy: userId,
-          ipAddress,
-          userAgent,
-          newValues: { status: 'POSTED', postedBy: userId },
+        // Atomically update inventory balance projection
+        await inventoryBalanceService.increaseStock({
+          materialId: line.materialId,
+          warehouseId: lockedChallan.warehouseId,
+          ownerType: lockedChallan.ownerType,
+          customerId: lockedChallan.customerId,
+          lotId: lot._id,
+          quantity: line.receivedQuantity,
+          unit: line.unit,
+          transactionId: txn._id,
           session,
         });
+      }
 
-        result = {
-          ...lockedChallan.toObject(),
-          message: 'Inbound challan posted and inventory balances updated successfully',
-        };
-
-        // 4. Save Idempotency Record if key provided
-        if (idempotencyKey) {
-          const reqHash = InventoryIdempotencyUtil.computeHash(input);
-          await InventoryIdempotencyUtil.recordResponse(
-            idempotencyKey,
-            endpoint,
-            reqHash,
-            200,
-            result,
-            session,
-          );
-        }
+      // 3. Record Audit Log inside transaction
+      await InventoryAuditUtil.record({
+        action: 'POST',
+        entityType: 'InboundChallan',
+        entityId: lockedChallan._id,
+        performedBy: userId,
+        ipAddress,
+        userAgent,
+        newValues: { status: 'POSTED', postedBy: userId },
+        session,
       });
-    } finally {
-      await session.endSession();
-    }
 
-    return result;
+      const result = {
+        ...lockedChallan.toObject(),
+        message: 'Inbound challan posted and inventory balances updated successfully',
+      };
+
+      // 4. Save Idempotency Record if key provided
+      if (idempotencyKey) {
+        const reqHash = InventoryIdempotencyUtil.computeHash(input);
+        await InventoryIdempotencyUtil.recordResponse(
+          idempotencyKey,
+          endpoint,
+          reqHash,
+          200,
+          result,
+          session,
+        );
+      }
+
+      return result;
+    });
   }
 }
 

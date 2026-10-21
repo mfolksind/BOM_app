@@ -68,13 +68,12 @@ const productionOrderSchema = new Schema<IProductionOrder>(
     },
     targetCompletionDate: {
       type: Date,
-      required: [true, 'Target completion date is required'],
     },
     status: {
       type: String,
       required: true,
-      enum: ['DRAFT', 'RELEASED', 'IN_PROGRESS', 'COMPLETED', 'HALTED', 'CANCELLED'],
-      default: 'DRAFT',
+      enum: ['RELEASED', 'IN_PROGRESS', 'COMPLETED', 'HALTED', 'CANCELLED'],
+      default: 'RELEASED',
     },
     releasedBy: {
       type: Schema.Types.ObjectId,

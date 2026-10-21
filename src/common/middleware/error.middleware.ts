@@ -29,7 +29,7 @@ export const errorHandler = (
     statusCode = HttpStatus.CONFLICT;
     message = 'Duplicate key error: resource already exists';
   } else if (
-    ('code' in err && (err as { code: number }).code === 112) ||
+    ('code' in err && ((err as { code: number }).code === 112 || (err as { code: number }).code === 24)) ||
     ('name' in err && err.name === 'MongoServerError' && err.message?.includes('Write conflict'))
   ) {
     // Concurrent transaction write conflict
