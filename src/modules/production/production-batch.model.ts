@@ -9,7 +9,6 @@ export interface IProductionBatch extends Document {
   productionOrderId: mongoose.Types.ObjectId;
   workOrderId?: mongoose.Types.ObjectId;
   processStageId: mongoose.Types.ObjectId;
-  machineId?: mongoose.Types.ObjectId;
   machineCode: string;
   operatorId?: mongoose.Types.ObjectId;
   plannedQuantity: number;
@@ -47,13 +46,9 @@ const productionBatchSchema = new Schema<IProductionBatch>(
       ref: 'ProcessStage',
       required: [true, 'Process Stage reference is required'],
     },
-    machineId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Machine',
-    },
     machineCode: {
       type: String,
-      default: 'MACHINE_1',
+      required: [true, 'Machine code is required'],
       trim: true,
       uppercase: true,
     },
@@ -79,6 +74,7 @@ const productionBatchSchema = new Schema<IProductionBatch>(
     status: {
       type: String,
       required: true,
+      enum: ['PENDING', 'IN_PROCESS', 'COMPLETED', 'HALTED', 'REJECTED'],
       default: 'PENDING',
     },
     shift: {
