@@ -2,6 +2,7 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export type DrumMovementType =
   | 'CREATED'
+  | 'INBOUND_RECEIPT'
   | 'ASSIGNED'
   | 'STAGE_TRANSFER'
   | 'PACKING'
@@ -46,6 +47,7 @@ const drumMovementSchema = new Schema<IDrumMovement>(
       required: [true, 'Movement type is required'],
       enum: [
         'CREATED',
+        'INBOUND_RECEIPT',
         'ASSIGNED',
         'STAGE_TRANSFER',
         'PACKING',

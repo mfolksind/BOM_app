@@ -2,7 +2,8 @@
 
 A modular, production-ready backend and comprehensive MongoDB data model layer for a Cable Manufacturing Job-Work Enterprise Resource Planning (ERP) system, built with Node.js, TypeScript, Express.js, MongoDB (Mongoose), and Docker Compose.
 
-> 📖 **Phase 5 Production Workflow Guide:** For the full operational guide on Global Machine selection, multi-material batch consumption, constant auto-scrap calculation, test failure reversal, and automated drum packaging, see [PHASE5_PRODUCTION_WORKFLOW_README.md](file:///e:/Mfolks_BOM/PHASE5_PRODUCTION_WORKFLOW_README.md).
+> 📖 **Phase 5 Production Workflow Guide:** For the full operational guide on Global Machine selection, multi-material batch consumption, constant auto-scrap calculation, test failure reversal, and automated drum packaging, see [PHASE5_PRODUCTION_WORKFLOW_README.md](file:///e:/Mfolks_BOM/PHASE5_PRODUCTION_WORKFLOW_README.md).  
+> 📦 **Packing Module & Drum Challan Guide:** For the complete operational guide on receiving customer empty drums under Inbound Challan/RGP, generating Packing Lists matching factory physical challans, and generating Outbound Delivery Challans, see [PACKING_MODULE_DRUM_CHALLAN_CHANGES.md](file:///e:/Mfolks_BOM/PACKING_MODULE_DRUM_CHALLAN_CHANGES.md).
 
 ---
 

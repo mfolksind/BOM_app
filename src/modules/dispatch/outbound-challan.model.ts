@@ -5,10 +5,17 @@ export type OutboundChallanStatus = 'DRAFT' | 'ISSUED' | 'ACKNOWLEDGED' | 'CANCE
 export interface IOutboundChallanItem {
   drumId: mongoose.Types.ObjectId;
   drumNumber: string;
+  sNo?: number;
   productId: mongoose.Types.ObjectId;
   productCode: string;
   productName: string;
+  sizeDescription?: string;
+  lengthBottom?: number;
+  lengthTop?: number;
   lengthMeters: number;
+  drumSize?: string;
+  refRgpNumber?: string;
+  drumType?: string;
   tareWeightKg: number;
   netWeightKg: number;
   grossWeightKg: number;
@@ -17,8 +24,13 @@ export interface IOutboundChallanItem {
 
 export interface IOutboundChallan extends Document {
   challanNumber: string;
-  dispatchId: mongoose.Types.ObjectId;
+  dispatchId?: mongoose.Types.ObjectId;
+  packingListId?: mongoose.Types.ObjectId;
+  packingListNumber?: string;
+  invoiceNumber?: string;
+  sizeDescription?: string;
   workOrderId: mongoose.Types.ObjectId;
+  workOrderNumber?: string;
   customerId: mongoose.Types.ObjectId;
   challanDate: Date;
   deliveryTerms?: string;
@@ -54,6 +66,9 @@ const outboundChallanItemSchema = new Schema<IOutboundChallanItem>(
       type: String,
       required: true,
     },
+    sNo: {
+      type: Number,
+    },
     productId: {
       type: Schema.Types.ObjectId,
       ref: 'Product',
@@ -67,9 +82,33 @@ const outboundChallanItemSchema = new Schema<IOutboundChallanItem>(
       type: String,
       required: true,
     },
+    sizeDescription: {
+      type: String,
+      trim: true,
+    },
+    lengthBottom: {
+      type: Number,
+      default: 0,
+    },
+    lengthTop: {
+      type: Number,
+      default: 0,
+    },
     lengthMeters: {
       type: Number,
       required: true,
+    },
+    drumSize: {
+      type: String,
+      trim: true,
+    },
+    refRgpNumber: {
+      type: String,
+      trim: true,
+    },
+    drumType: {
+      type: String,
+      trim: true,
     },
     tareWeightKg: {
       type: Number,
@@ -102,12 +141,31 @@ const outboundChallanSchema = new Schema<IOutboundChallan>(
     dispatchId: {
       type: Schema.Types.ObjectId,
       ref: 'Dispatch',
-      required: [true, 'Dispatch reference is required'],
+    },
+    packingListId: {
+      type: Schema.Types.ObjectId,
+      ref: 'PackingList',
+    },
+    packingListNumber: {
+      type: String,
+      trim: true,
+    },
+    invoiceNumber: {
+      type: String,
+      trim: true,
+    },
+    sizeDescription: {
+      type: String,
+      trim: true,
     },
     workOrderId: {
       type: Schema.Types.ObjectId,
       ref: 'WorkOrder',
       required: [true, 'Work Order reference is required'],
+    },
+    workOrderNumber: {
+      type: String,
+      trim: true,
     },
     customerId: {
       type: Schema.Types.ObjectId,

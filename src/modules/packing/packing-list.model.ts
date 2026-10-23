@@ -5,8 +5,14 @@ export type PackingListStatus = 'DRAFT' | 'PACKED' | 'COMPLETED' | 'DISPATCHED' 
 export interface IPackingList extends Document {
   packingListNumber: string;
   workOrderId: mongoose.Types.ObjectId;
+  workOrderNumber?: string;
+  workOrderDate?: Date;
+  sizeDescription?: string;
   customerId: mongoose.Types.ObjectId;
   productId?: mongoose.Types.ObjectId;
+  invoiceNumber?: string;
+  challanNumber?: string;
+  outboundChallanId?: mongoose.Types.ObjectId;
   packingWarehouseId?: mongoose.Types.ObjectId;
   totalDrums: number;
   totalLengthMeters: number;
@@ -39,6 +45,17 @@ const packingListSchema = new Schema<IPackingList>(
       ref: 'WorkOrder',
       required: [true, 'Work Order reference is required'],
     },
+    workOrderNumber: {
+      type: String,
+      trim: true,
+    },
+    workOrderDate: {
+      type: Date,
+    },
+    sizeDescription: {
+      type: String,
+      trim: true,
+    },
     customerId: {
       type: Schema.Types.ObjectId,
       ref: 'Customer',
@@ -47,6 +64,18 @@ const packingListSchema = new Schema<IPackingList>(
     productId: {
       type: Schema.Types.ObjectId,
       ref: 'Product',
+    },
+    invoiceNumber: {
+      type: String,
+      trim: true,
+    },
+    challanNumber: {
+      type: String,
+      trim: true,
+    },
+    outboundChallanId: {
+      type: Schema.Types.ObjectId,
+      ref: 'OutboundChallan',
     },
     packingWarehouseId: {
       type: Schema.Types.ObjectId,

@@ -69,8 +69,14 @@ describe('Phase 5 Machine-Based Multi-Stage Workflow & Packaging Integration Tes
       name: 'Polycab Cables Ltd',
       gstin: '24AAAAA0000A1Z5',
       email: 'polycab@example.com',
-      phone: '9876543210',
-      billingAddress: { line1: 'GIDC', city: 'Vadodara', state: 'Gujarat', pincode: '390010' },
+      phone: '+919876543210',
+      billingAddress: {
+        street: 'GIDC Industrial Area',
+        city: 'Vadodara',
+        state: 'Gujarat',
+        postalCode: '390010',
+        country: 'India',
+      },
       isActive: true,
     });
     customerId = customer._id.toString();

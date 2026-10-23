@@ -3,6 +3,14 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IPackingListLine extends Document {
   packingListId: mongoose.Types.ObjectId;
   drumId: mongoose.Types.ObjectId;
+  sNo?: number;
+  drumNumber?: string;
+  lengthBottom: number;
+  lengthTop: number;
+  lengthTotal: number;
+  drumSize?: string;
+  refRgpNumber?: string;
+  drumType?: string;
   productId: mongoose.Types.ObjectId;
   lengthMeters: number;
   tareWeightKg: number;
@@ -28,6 +36,41 @@ const packingListLineSchema = new Schema<IPackingListLine>(
       ref: 'Drum',
       required: [true, 'Drum reference is required'],
     },
+    sNo: {
+      type: Number,
+      min: 1,
+    },
+    drumNumber: {
+      type: String,
+      trim: true,
+    },
+    lengthBottom: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lengthTop: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lengthTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    drumSize: {
+      type: String,
+      trim: true,
+    },
+    refRgpNumber: {
+      type: String,
+      trim: true,
+    },
+    drumType: {
+      type: String,
+      trim: true,
+    },
     productId: {
       type: Schema.Types.ObjectId,
       ref: 'Product',
@@ -40,18 +83,18 @@ const packingListLineSchema = new Schema<IPackingListLine>(
     },
     tareWeightKg: {
       type: Number,
-      required: [true, 'Tare weight is required'],
-      min: [0.000001, 'Tare weight must be positive'],
+      default: 0,
+      min: [0, 'Tare weight cannot be negative'],
     },
     netWeightKg: {
       type: Number,
-      required: [true, 'Net weight is required'],
-      min: [0.000001, 'Net weight must be positive'],
+      default: 0,
+      min: [0, 'Net weight cannot be negative'],
     },
     grossWeightKg: {
       type: Number,
-      required: [true, 'Gross weight is required'],
-      min: [0.000001, 'Gross weight must be positive'],
+      default: 0,
+      min: [0, 'Gross weight cannot be negative'],
     },
     conductorResistanceOhmPerKm: {
       type: Number,

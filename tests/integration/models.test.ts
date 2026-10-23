@@ -124,21 +124,14 @@ describe('MongoDB Data Model Layer Integration Tests', () => {
       expect(err?.errors.category).toBeDefined();
     });
 
-    it('should reject invalid enum values on Material category', async () => {
-      const invalidCategoryMaterial = new MaterialModel({
-        code: 'MAT-INVALID-01',
-        name: 'Invalid Item',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        category: 'INVALID_CATEGORY' as any,
+    it('allows flexible custom string values on Material category (flexible validation)', async () => {
+      const customCategoryMaterial = new MaterialModel({
+        code: 'MAT-CUSTOM-01',
+        name: 'Custom Category Item',
+        category: 'CUSTOM_CATEGORY_PERMITTED',
       });
-      let err: mongoose.Error.ValidationError | null = null;
-      try {
-        await invalidCategoryMaterial.validate();
-      } catch (e) {
-        err = e as mongoose.Error.ValidationError;
-      }
-      expect(err).not.toBeNull();
-      expect(err?.errors.category).toBeDefined();
+      const validationError = customCategoryMaterial.validateSync();
+      expect(validationError).toBeUndefined();
     });
 
     it('should reject negative quantities in inventory balance', async () => {

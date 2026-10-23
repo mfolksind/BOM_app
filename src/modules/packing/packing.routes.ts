@@ -5,6 +5,7 @@ import { authorizeRole } from '../../common/middleware/authorize.middleware';
 import { validate } from '../../common/middleware/validate.middleware';
 import {
   createDrumSchema,
+  receiveCustomerDrumsSchema,
   updateDrumSchema,
   listDrumsQuerySchema,
   drumIdParamSchema,
@@ -13,6 +14,7 @@ import {
   listPackingListsQuerySchema,
   packingListIdParamSchema,
   cancelPackingListSchema,
+  generateChallanFromPackingListSchema,
 } from './packing.validation';
 
 // Drums Router (/api/v1/drums)
@@ -22,6 +24,9 @@ drumRoutes.use(authenticate, authorizeRole('SUPER_ADMIN', 'ADMIN'));
 
 drumRoutes.post('/', validate(createDrumSchema), (req, res, next) =>
   packingController.createDrum(req, res, next),
+);
+drumRoutes.post('/receive-inbound', validate(receiveCustomerDrumsSchema), (req, res, next) =>
+  packingController.receiveCustomerDrums(req, res, next),
 );
 drumRoutes.get('/', validate(listDrumsQuerySchema), (req, res, next) =>
   packingController.listDrums(req, res, next),
@@ -50,11 +55,19 @@ packingListRoutes.get('/', validate(listPackingListsQuerySchema), (req, res, nex
 packingListRoutes.get('/:id', validate(packingListIdParamSchema), (req, res, next) =>
   packingController.getPackingListById(req, res, next),
 );
+packingListRoutes.get('/:id/document', validate(packingListIdParamSchema), (req, res, next) =>
+  packingController.getPackingListDocument(req, res, next),
+);
 packingListRoutes.patch('/:id', validate(updatePackingListSchema), (req, res, next) =>
   packingController.updatePackingList(req, res, next),
 );
 packingListRoutes.post('/:id/pack', validate(packingListIdParamSchema), (req, res, next) =>
   packingController.packPackingList(req, res, next),
+);
+packingListRoutes.post(
+  '/:id/generate-challan',
+  validate(generateChallanFromPackingListSchema),
+  (req, res, next) => packingController.generateChallanFromPackingList(req, res, next),
 );
 packingListRoutes.post('/:id/cancel', validate(cancelPackingListSchema), (req, res, next) =>
   packingController.cancelPackingList(req, res, next),

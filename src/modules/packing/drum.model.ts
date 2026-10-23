@@ -39,6 +39,11 @@ export interface IDrum extends Document {
   location?: string;
   ownership: DrumOwnership;
   customerId?: mongoose.Types.ObjectId;
+  drumSize?: string;
+  refRgpNumber?: string;
+  inboundChallanId?: mongoose.Types.ObjectId;
+  inboundChallanNumber?: string;
+  receivedDate?: Date;
   packingListId?: mongoose.Types.ObjectId;
   dispatchId?: mongoose.Types.ObjectId;
   remarks?: string;
@@ -154,6 +159,25 @@ const drumSchema = new Schema<IDrum>(
     customerId: {
       type: Schema.Types.ObjectId,
       ref: 'Customer',
+    },
+    drumSize: {
+      type: String,
+      trim: true,
+    },
+    refRgpNumber: {
+      type: String,
+      trim: true,
+    },
+    inboundChallanId: {
+      type: Schema.Types.ObjectId,
+      ref: 'InboundChallan',
+    },
+    inboundChallanNumber: {
+      type: String,
+      trim: true,
+    },
+    receivedDate: {
+      type: Date,
     },
     packingListId: {
       type: Schema.Types.ObjectId,

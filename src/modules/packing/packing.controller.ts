@@ -137,6 +137,20 @@ export class PackingController {
     }
   }
 
+  async receiveCustomerDrums(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = (req.user as unknown as { _id?: string })?._id?.toString();
+      const result = await packingService.receiveCustomerDrums(req.body, userId);
+      ApiResponseUtil.created(
+        res,
+        result,
+        'Customer drums received successfully and inbound challan logged',
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async packPackingList(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = (req.user as unknown as { _id?: string })?._id?.toString();
@@ -164,6 +178,33 @@ export class PackingController {
         packingList,
         'Packing list cancelled and drums released back to available pool',
       );
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getPackingListDocument(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const document = await packingService.getPackingListDocument(req.params.id);
+      ApiResponseUtil.success(res, document, 'Packing list document rendered successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async generateChallanFromPackingList(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const userId = (req.user as unknown as { _id?: string })?._id?.toString();
+      const challan = await packingService.generateChallanFromPackingList(
+        req.params.id,
+        req.body,
+        userId,
+      );
+      ApiResponseUtil.created(res, challan, 'Outbound delivery challan generated successfully');
     } catch (err) {
       next(err);
     }
