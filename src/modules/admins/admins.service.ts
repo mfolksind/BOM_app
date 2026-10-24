@@ -106,7 +106,7 @@ export class AdminsService {
     const limit = params.limit || 10;
     const skip = (page - 1) * limit;
 
-    const filter: Record<string, unknown> = { role: 'ADMIN' };
+    const filter: Record<string, unknown> = { role: { $in: ['ADMIN', 'SUPER_ADMIN'] } };
 
     if (params.isActive !== undefined) {
       filter.isActive = params.isActive === 'true';
@@ -383,6 +383,57 @@ export class AdminsService {
     });
 
     return { deleted: true, id };
+  }
+
+  /**
+   * Retrieve audit logs with pagination and filters
+   */
+  async getAuditLogs(params: {
+    page?: number;
+    limit?: number;
+    action?: string;
+    entityType?: string;
+    performedBy?: string;
+  }): Promise<PaginatedResult<any>> {
+    const page = Number(params.page) || 1;
+    const limit = Math.min(Number(params.limit) || 20, 100);
+    const skip = (page - 1) * limit;
+
+    const filter: Record<string, unknown> = {};
+
+    if (params.action && params.action !== 'ALL') {
+      filter.action = params.action;
+    }
+    if (params.entityType && params.entityType !== 'ALL') {
+      filter.entityType = params.entityType;
+    }
+    if (params.performedBy) {
+      if (mongoose.isValidObjectId(params.performedBy)) {
+        filter.performedBy = new mongoose.Types.ObjectId(params.performedBy);
+      }
+    }
+
+    const [items, total] = await Promise.all([
+      AuditLogModel.find(filter)
+        .populate('performedBy', 'firstName lastName email employeeCode role')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      AuditLogModel.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    };
   }
 }
 

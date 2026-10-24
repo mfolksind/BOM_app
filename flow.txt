@@ -1,0 +1,25 @@
+Complete Operational Workflow
+
+System Setup: Create admin accounts, customers, warehouses, raw materials, cable products, and Bills of Materials (BOMs). Define material consumption norms and permitted scrap tolerances.
+
+Material Receiving: Receive customer materials through inbound delivery challans. Support multiple deliveries for the same job, validate quantities and quality, create unique material lots, and update customer-specific inventory.
+
+Work Order: Create a work order against the customer's purchase order, specifying the cable type, required quantity, and deadlines. Freeze the applicable BOM so future changes do not affect existing orders.
+
+Material Reservation: Calculate required raw materials from the BOM and reserve available customer-owned stock before production begins. Clearly identify shortages.
+
+Production Planning: Create production orders and schedule machine batches across manufacturing stages, including wire drawing, stranding, insulation, laying-up, inner sheathing, armouring, and outer sheathing.
+
+Material Issue: Transfer reserved materials from the main warehouse to shopfloor work-in-progress (WIP). A transfer must change the warehouse balance without recording material as consumed.
+
+Shortage and Supplementary Delivery: If material runs short during production, prevent consumption beyond available WIP stock. Receive additional material through a supplementary inbound challan, create a new material lot, transfer the required quantity to WIP, and resume production without losing traceability.
+
+Consumption, Scrap, and Returns: Record actual material consumption for each production batch. Track process waste and scrap separately, enforce permitted tolerances, and return unused materials to the appropriate warehouse.
+
+Production Output and Quality Control: Record finished cable length and weights, conduct required electrical and mechanical tests, and update finished-goods inventory only after production output is accepted and posted.
+
+Drums and Packing: Register cable drums, assign finished cable to drums, record cable lengths and tare, net, and gross weights, and generate packing lists with seals and packing status.
+
+Dispatch: Create dispatch orders, record transporter and vehicle details, select packed drums, generate outbound delivery challans, and update inventory and dispatch quantities when goods leave the factory.
+
+Final Reconciliation: Generate a customer-wise and material-wise reconciliation report covering every inbound challan, including supplementary deliveries. Show total received, consumed, scrapped, returned, and remaining quantities across warehouses and WIP.

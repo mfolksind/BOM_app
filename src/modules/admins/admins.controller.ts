@@ -77,6 +77,24 @@ export class AdminsController {
     const result = await adminsService.deleteAdmin(req.params.id, req.user!._id.toString(), req.ip);
     return ApiResponseUtil.success(res, result, 'Admin account deleted successfully');
   });
+
+  getAuditLogs = asyncHandler(async (req: Request, res: Response) => {
+    const result = await adminsService.getAuditLogs(req.query as any);
+    return ApiResponseUtil.success(
+      res,
+      result.items,
+      'Audit logs retrieved successfully',
+      200,
+      {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+        hasNext: result.hasNext,
+        hasPrev: result.hasPrev,
+      },
+    );
+  });
 }
 
 export const adminsController = new AdminsController();
