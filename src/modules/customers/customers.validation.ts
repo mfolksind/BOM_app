@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const addressSchema = z.object({
-  street: z.string().min(1, 'Street is required').trim().optional(),
+  street: z.string().min(1, 'Street address is required').trim(),
   city: z.string().min(1, 'City is required').trim(),
   state: z.string().min(1, 'State is required').trim(),
   postalCode: z.string().min(1, 'Postal code is required').trim(),

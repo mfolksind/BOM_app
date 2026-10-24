@@ -11,12 +11,16 @@ import {
 
 const router = Router();
 
-// All Admin management & Audit Log routes require SUPER_ADMIN authorization
-router.use(authenticate, authorizeRole('SUPER_ADMIN'));
+// Authenticate all routes
+router.use(authenticate);
 
-router.get('/', validate({ query: adminQuerySchema }), adminsController.listAdmins);
-router.get('/audit-logs', adminsController.getAuditLogs);
-router.get('/:id', adminsController.getAdminById);
+// Listing admins (used for operator/staff selection across ERP) allowed for both SUPER_ADMIN and ADMIN
+router.get('/', authorizeRole('SUPER_ADMIN', 'ADMIN'), validate({ query: adminQuerySchema }), adminsController.listAdmins);
+router.get('/audit-logs', authorizeRole('SUPER_ADMIN'), adminsController.getAuditLogs);
+router.get('/:id', authorizeRole('SUPER_ADMIN', 'ADMIN'), adminsController.getAdminById);
+
+// Admin management mutations require SUPER_ADMIN
+router.use(authorizeRole('SUPER_ADMIN'));
 
 router.post('/', validate(createAdminSchema), adminsController.createAdmin);
 router.patch('/:id', validate(updateAdminSchema), adminsController.updateAdmin);
