@@ -232,6 +232,88 @@ export class ProcessStagesService {
       },
     });
   }
+
+  /**
+   * Seed standard cable manufacturing process stages if none exist.
+   */
+  async seedDefaultStages(performedByUserId?: string, ipAddress?: string): Promise<IProcessStage[]> {
+    const defaultStages = [
+      {
+        code: 'STAGE-DRAWING',
+        name: 'Wire Drawing',
+        sequenceOrder: 1,
+        category: 'CONDUCTOR_PREPARATION',
+        description: 'Drawing copper wire rod or EC aluminum rod to intermediate/fine conductor wire gauge.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-STRANDING',
+        name: 'Conductor Stranding / Bunching',
+        sequenceOrder: 2,
+        category: 'CONDUCTOR_PREPARATION',
+        description: 'Bunching and compacting fine wires into flexible/shaped conductor cores.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-INSULATION',
+        name: 'Insulation Extrusion',
+        sequenceOrder: 3,
+        category: 'INSULATION',
+        description: 'Continuous extrusion of XLPE or PVC compound layer over conductor.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-LAYING',
+        name: 'Laying-Up / Core Assembly',
+        sequenceOrder: 4,
+        category: 'ASSEMBLY',
+        description: 'Twisting multiple insulated cores together with non-hygroscopic fillers.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-BEDDING',
+        name: 'Inner Sheathing (Bedding)',
+        sequenceOrder: 5,
+        category: 'SHEATHING',
+        description: 'Extruding inner PVC bedding layer to provide circular base for armouring.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-ARMOURING',
+        name: 'Armouring',
+        sequenceOrder: 6,
+        category: 'ARMOURING',
+        description: 'Applying galvanized steel strip (flat) or wire (round) for mechanical protection.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-OUTER-SHEATH',
+        name: 'Outer Sheathing (Jacketing)',
+        sequenceOrder: 7,
+        category: 'SHEATHING',
+        description: 'Extruding final tough PVC ST-2 / HDPE outer jacket over armour.',
+        isActive: true,
+      },
+      {
+        code: 'STAGE-FINAL-TEST',
+        name: 'Final Testing & Drum Reeling',
+        sequenceOrder: 8,
+        category: 'TESTING_PACKING',
+        description: 'Routine spark testing, HV test, conductor resistance, and drum packaging.',
+        isActive: true,
+      },
+    ];
+
+    const created: IProcessStage[] = [];
+    for (const stageData of defaultStages) {
+      const existing = await ProcessStageModel.findOne({ code: stageData.code });
+      if (!existing) {
+        const stage = await ProcessStageModel.create(stageData);
+        created.push(stage);
+      }
+    }
+    return created;
+  }
 }
 
 export const processStagesService = new ProcessStagesService();

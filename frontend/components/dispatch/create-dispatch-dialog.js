@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Sheet,
   SheetContent,
@@ -22,6 +22,7 @@ import {
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { toast } from 'sonner';
 import { Truck, Send, Building2, Warehouse } from 'lucide-react';
+import { api } from '@/lib/api';
 
 export function CreateDispatchDialog({
   open,
@@ -32,6 +33,59 @@ export function CreateDispatchDialog({
   onSuccess,
 }) {
   const [loading, setLoading] = useState(false);
+  const [localCustomers, setLocalCustomers] = useState(customers);
+  const [localWorkOrders, setLocalWorkOrders] = useState(workOrders);
+  const [localWarehouses, setLocalWarehouses] = useState(warehouses);
+
+  useEffect(() => {
+    if (customers?.length > 0) setLocalCustomers(customers);
+  }, [customers]);
+
+  useEffect(() => {
+    if (workOrders?.length > 0) setLocalWorkOrders(workOrders);
+  }, [workOrders]);
+
+  useEffect(() => {
+    if (warehouses?.length > 0) setLocalWarehouses(warehouses);
+  }, [warehouses]);
+
+  const fetchMasters = async () => {
+    try {
+      const [cRes, woRes, whRes] = await Promise.all([
+        api.get('/customers?limit=100'),
+        api.get('/work-orders?limit=100'),
+        api.get('/warehouses?limit=100'),
+      ]);
+      const custList = Array.isArray(cRes?.data) ? cRes.data : (cRes?.data?.items || cRes?.data?.customers || []);
+      const woList = woRes?.data?.workOrders || woRes?.data?.items || (Array.isArray(woRes?.data) ? woRes?.data : []);
+      const whList = Array.isArray(whRes?.data) ? whRes.data : (whRes?.data?.items || whRes?.data?.warehouses || []);
+
+      if (custList.length > 0) setLocalCustomers(custList);
+      if (woList.length > 0) setLocalWorkOrders(woList);
+      if (whList.length > 0) {
+        setLocalWarehouses(whList);
+        setFormData((prev) => {
+          if (prev.sourceWarehouseId) return prev;
+          const preferred = whList.find((w) => w.type === 'FINISHED_GOODS') || whList[0];
+          return { ...prev, sourceWarehouseId: preferred?._id || '' };
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load masters in CreateDispatchDialog', err);
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      if (localCustomers.length === 0 || localWarehouses.length === 0) {
+        fetchMasters();
+      } else if (!formData.sourceWarehouseId && localWarehouses.length > 0) {
+        const preferred = localWarehouses.find((w) => w.type === 'FINISHED_GOODS') || localWarehouses[0];
+        setFormData((prev) => ({ ...prev, sourceWarehouseId: preferred?._id || '' }));
+      }
+    }
+  }, [open, localCustomers.length, localWarehouses.length]);
+
   const [formData, setFormData] = useState({
     customerId: '',
     workOrderId: '',
@@ -132,7 +186,7 @@ export function CreateDispatchDialog({
                 Customer / Consignee <span className="text-rose-500">*</span>
               </Label>
               <SearchableSelect
-                options={customers.map((c) => ({
+                options={(Array.isArray(localCustomers) ? localCustomers : []).map((c) => ({
                   value: c._id,
                   label: c.name,
                   code: c.code,
@@ -152,7 +206,7 @@ export function CreateDispatchDialog({
                 <SearchableSelect
                   options={[
                     { value: '', label: 'Direct Stock Dispatch (No WO)' },
-                    ...workOrders.map((w) => ({
+                    ...(Array.isArray(localWorkOrders) ? localWorkOrders : []).map((w) => ({
                       value: w._id,
                       label: w.workOrderNumber,
                       code: w.productId?.code,
@@ -171,7 +225,7 @@ export function CreateDispatchDialog({
                   Dispatch Warehouse <span className="text-rose-500">*</span>
                 </Label>
                 <SearchableSelect
-                  options={warehouses.map((w) => ({
+                  options={(Array.isArray(localWarehouses) ? localWarehouses : []).map((w) => ({
                     value: w._id,
                     label: w.name,
                     code: w.code,

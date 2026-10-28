@@ -6,6 +6,7 @@ import { InventoryTransactionModel } from './inventory-transaction.model';
 import { MaterialModel } from '../materials/material.model';
 import { WarehouseModel } from '../warehouses/warehouse.model';
 import { CustomerModel } from '../customers/customer.model';
+import { DrumModel } from '../packing/drum.model';
 import { inventoryBalanceService } from './inventory-balance.service';
 import { InventorySequenceUtil } from './inventory-sequence.util';
 import { InventoryIdempotencyUtil } from './inventory-idempotency.util';
@@ -62,14 +63,17 @@ export class InboundChallansService {
     }
 
     // 3. Validate line materials
-    for (let i = 0; i < input.lines.length; i++) {
-      const line = input.lines[i];
-      const material = await MaterialModel.findById(line.materialId);
-      if (!material) {
-        throw new NotFoundError(`Material at line ${i + 1} with ID '${line.materialId}' not found`);
-      }
-      if (!material.isActive) {
-        throw new BadRequestError(`Material '${material.name}' at line ${i + 1} is inactive`);
+    // 3. Verify all materials exist and are active (if lines present)
+    if (input.lines && input.lines.length > 0) {
+      for (let i = 0; i < input.lines.length; i++) {
+        const line = input.lines[i];
+        const material = await MaterialModel.findById(line.materialId);
+        if (!material) {
+          throw new NotFoundError(`Material at line ${i + 1} with ID '${line.materialId}' not found`);
+        }
+        if (!material.isActive) {
+          throw new BadRequestError(`Material '${material.name}' at line ${i + 1} is inactive`);
+        }
       }
     }
 
@@ -94,18 +98,64 @@ export class InboundChallansService {
     });
 
     // 6. Create Challan Lines
-    const lineDocs = await InboundChallanLineModel.insertMany(
-      input.lines.map((line) => ({
-        inboundChallanId: challan._id,
-        materialId: line.materialId,
-        declaredQuantity: line.declaredQuantity,
-        receivedQuantity: line.receivedQuantity,
-        unit: line.unit,
-        supplierLotNumber: line.supplierLotNumber,
-        qualityStatus: 'PENDING_QC',
-        remarks: line.remarks,
-      })),
-    );
+    const lineDocs = input.lines?.length
+      ? await InboundChallanLineModel.insertMany(
+          input.lines.map((line) => ({
+            inboundChallanId: challan._id,
+            materialId: line.materialId,
+            declaredQuantity: line.declaredQuantity,
+            receivedQuantity: line.receivedQuantity,
+            unit: line.unit,
+            supplierLotNumber: line.supplierLotNumber,
+            qualityStatus: 'PENDING_QC',
+            remarks: line.remarks,
+          })),
+        )
+      : [];
+
+    // 7. Register Returnable Drums (if supplied on this challan)
+    const createdDrums: any[] = [];
+    if (input.drums && input.drums.quantity > 0) {
+      const drumCount = input.drums.quantity;
+      const prefix = input.drums.prefix || 'MF/';
+      const rgp = input.drums.refRgpNumber || input.customerChallanNumber;
+      const sizeStr = input.drums.drumSize || '44X16X24';
+      const startNum = input.drums.startingNumber || 1;
+
+      for (let i = 0; i < drumCount; i++) {
+        const num = startNum + i;
+        let drumNumber = `${prefix}${String(num).padStart(2, '0')}`;
+        const existing = await DrumModel.findOne({ drumNumber });
+        if (existing) {
+          drumNumber = `${prefix}${Date.now().toString().slice(-4)}-${String(num).padStart(2, '0')}`;
+        }
+
+        const drum = await DrumModel.create({
+          drumNumber,
+          drumType: input.drums.drumType || 'WOODEN',
+          ownership: input.ownerType === 'CUSTOMER' ? 'CUSTOMER_SUPPLIED' : 'FACTORY_OWNED',
+          customerId: input.customerId,
+          currentWarehouseId: input.warehouseId,
+          flangeDiameterMm: input.drums.flangeDiameterMm || 44,
+          barrelDiameterMm: input.drums.barrelDiameterMm || 16,
+          traverseWidthMm: input.drums.traverseWidthMm || 24,
+          drumSize: sizeStr,
+          tareWeightKg: input.drums.tareWeightKg || 85,
+          grossWeightKg: input.drums.tareWeightKg || 85,
+          netWeightKg: 0,
+          cableLengthMeters: 0,
+          status: 'AVAILABLE',
+          refRgpNumber: rgp,
+          inboundChallanId: challan._id,
+          inboundChallanNumber: input.customerChallanNumber,
+          receivedDate: input.customerChallanDate,
+          remarks:
+            input.drums.remarks ||
+            `Inbound drum receipt via Challan ${input.customerChallanNumber} (Ref RGP: ${rgp})`,
+        });
+        createdDrums.push(drum);
+      }
+    }
 
     await InventoryAuditUtil.record({
       action: 'CREATE',
@@ -114,12 +164,13 @@ export class InboundChallansService {
       performedBy: userId,
       ipAddress,
       userAgent,
-      newValues: { challanNumber, linesCount: lineDocs.length },
+      newValues: { challanNumber, linesCount: lineDocs.length, drumsCount: createdDrums.length },
     });
 
     return {
       ...challan.toObject(),
       lines: lineDocs,
+      drums: createdDrums,
     };
   }
 

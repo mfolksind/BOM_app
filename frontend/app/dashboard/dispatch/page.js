@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { api, apiClient } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,19 +32,32 @@ import {
   Truck,
   Plus,
   Search,
-  Filter,
-  MoreVertical,
-  CheckCircle2,
   RefreshCw,
   Eye,
   FileText,
   Send,
   XCircle,
+  FileCheck2,
+  Package,
+  Layers,
+  Building2,
+  Calendar,
+  CheckCircle2,
 } from 'lucide-react';
+
 import { CreateDispatchDialog } from '@/components/dispatch/create-dispatch-dialog';
+import { MaterialConsumptionSheetDialog } from '@/components/dispatch/material-consumption-sheet-dialog';
+import { PackingListDocumentDialog } from '@/components/packing/packing-list-document-dialog';
 
 export default function DispatchManagementPage() {
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('challans'); // 'challans' | 'shipments'
+
+  // Outbound Delivery Challans (GST Job Work)
+  const [outboundChallans, setOutboundChallans] = useState([]);
+  const [loadingChallans, setLoadingChallans] = useState(true);
+
+  // Shipments State
   const [dispatches, setDispatches] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
@@ -58,6 +71,27 @@ export default function DispatchManagementPage() {
 
   // Dialog state
   const [createDispatchOpen, setCreateDispatchOpen] = useState(false);
+  const [selectedChallanId, setSelectedChallanId] = useState(null);
+  const [selectedPackingListId, setSelectedPackingListId] = useState(null);
+
+  // Fetch Outbound Challans
+  const fetchOutboundChallans = useCallback(async () => {
+    setLoadingChallans(true);
+    try {
+      const res = await apiClient('/outbound-challans?limit=50');
+      if (res?.data) {
+        const list = Array.isArray(res.data) ? res.data : (res.data.items || res.data.challans || []);
+        setOutboundChallans(list);
+      } else {
+        setOutboundChallans([]);
+      }
+    } catch (err) {
+      toast.error('Failed to load outbound challans', { description: err.message });
+      setOutboundChallans([]);
+    } finally {
+      setLoadingChallans(false);
+    }
+  }, []);
 
   const fetchDropdownData = useCallback(async () => {
     try {
@@ -66,9 +100,14 @@ export default function DispatchManagementPage() {
         api.get('/work-orders?limit=100'),
         api.get('/warehouses?limit=100'),
       ]);
-      if (cRes?.data?.items) setCustomers(cRes.data.items);
-      if (woRes?.data) setWorkOrders(woRes.data.workOrders || woRes.data.items || []);
-      if (whRes?.data?.items) setWarehouses(whRes.data.items);
+      const custList = Array.isArray(cRes?.data) ? cRes.data : (cRes?.data?.items || cRes?.data?.customers || []);
+      setCustomers(custList);
+
+      const woList = woRes?.data?.workOrders || woRes?.data?.items || (Array.isArray(woRes?.data) ? woRes.data : []);
+      setWorkOrders(woList);
+
+      const whList = Array.isArray(whRes?.data) ? whRes.data : (whRes?.data?.items || whRes?.data?.warehouses || []);
+      setWarehouses(whList);
     } catch (err) {
       console.error('Failed to load dispatch metadata', err);
     }
@@ -90,44 +129,35 @@ export default function DispatchManagementPage() {
 
       const res = await api.get(`/dispatches?${queryParams.toString()}`);
       if (res?.data) {
-        setDispatches(res.data.items || res.data.dispatches || []);
-        const pagination = res.data.pagination || {};
-        setTotalPages(pagination.totalPages || res.data.totalPages || 1);
-        setTotalCount(pagination.total || res.data.total || 0);
+        const list = Array.isArray(res.data) ? res.data : (res.data.items || res.data.dispatches || []);
+        setDispatches(list);
+        const pagination = res.meta?.pagination || res.data.pagination || {};
+        setTotalPages(pagination.totalPages || 1);
+        setTotalCount(pagination.total || list.length);
+      } else {
+        setDispatches([]);
       }
     } catch (err) {
       toast.error(err.message || 'Failed to fetch dispatches');
+      setDispatches([]);
     } finally {
       setLoading(false);
     }
   }, [page, selectedStatus, search]);
 
   useEffect(() => {
+    fetchOutboundChallans();
     fetchDropdownData();
-  }, [fetchDropdownData]);
-
-  useEffect(() => {
     fetchDispatches();
-  }, [fetchDispatches]);
-
-  const handleCreateDispatch = async (payload) => {
-    const res = await api.post('/dispatches', payload);
-    if (res?.success) {
-      toast.success('Outbound dispatch record created');
-      fetchDispatches();
-    }
-  };
+  }, []);
 
   const handlePostDispatch = async (dispatchId) => {
-    if (!confirm('Confirm and post this dispatch? This will deduct finished goods stock and update drum statuses.')) return;
     try {
-      const res = await api.post(`/dispatches/${dispatchId}/dispatch`, {});
-      if (res?.success) {
-        toast.success('Dispatch posted! Stock deducted and outbound transaction logged.');
-        fetchDispatches();
-      }
+      await api.post(`/dispatches/${dispatchId}/dispatch`, {});
+      toast.success('Shipment marked as Dispatched');
+      fetchDispatches();
     } catch (err) {
-      toast.error(err.message || 'Failed to post dispatch');
+      toast.error(err.message || 'Failed to dispatch shipment');
     }
   };
 
@@ -135,236 +165,346 @@ export default function DispatchManagementPage() {
     try {
       const res = await api.post(`/dispatches/${dispatchId}/generate-outbound-challan`, {});
       if (res?.success) {
-        toast.success('Official Outbound Delivery Challan generated');
-        fetchDispatches();
+        toast.success(`Outbound Challan ${res.data.challanNumber} generated`);
+        fetchOutboundChallans();
+        setActiveTab('challans');
       }
     } catch (err) {
-      toast.error(err.message || 'Failed to generate delivery challan');
-    }
-  };
-
-  const getDispatchStatusBadge = (status) => {
-    switch (status) {
-      case 'DISPATCHED':
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Dispatched & Left Gate</Badge>;
-      case 'DRAFT':
-        return <Badge variant="outline" className="text-amber-700 bg-amber-50 border-amber-300">Draft (Loading)</Badge>;
-      case 'CANCELLED':
-        return <Badge variant="secondary" className="text-slate-500 bg-slate-100">Cancelled</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+      toast.error(err.message || 'Failed to generate challan');
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Outbound Dispatch & Challans</h2>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+            <Truck className="w-7 h-7 text-indigo-600" />
+            Outbound Dispatch &amp; Delivery Challans
+          </h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Finished cable delivery challans, truck consignments, and customer delivery receipts.
+            Manage statutory GST Job-Work Delivery Challans, Material Consumption Sheets (Image 2), and vehicle shipments.
           </p>
         </div>
+
         <div className="flex items-center gap-2.5">
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchDispatches}
-            className="h-10 text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              fetchOutboundChallans();
+              fetchDispatches();
+            }}
+            className="h-9 px-3 gap-1.5 text-xs text-slate-700 bg-white"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className="w-3.5 h-3.5" />
             Refresh
           </Button>
+
           <Button
             onClick={() => setCreateDispatchOpen(true)}
-            className="h-10 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs gap-2"
+            className="h-9 px-3.5 gap-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold cursor-pointer shadow-xs"
           >
             <Plus className="w-4 h-4" />
-            Create Outbound Dispatch
+            New Dispatch Shipment
           </Button>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input
-            placeholder="Search Dispatch # or Vehicle..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-10 text-sm bg-slate-50/50"
-          />
-        </div>
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setActiveTab('challans')}
+          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'challans'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <FileCheck2 className="w-4 h-4" />
+          Delivery Challans &amp; Material Consumption Sheets ({outboundChallans.length})
+        </button>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
-          <Select value={selectedStatus} onValueChange={(val) => { setSelectedStatus(val); setPage(1); }}>
-            <SelectTrigger className="w-full sm:w-44 h-10 text-sm">
-              <SelectValue placeholder="All Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Status</SelectItem>
-              <SelectItem value="DRAFT">Draft</SelectItem>
-              <SelectItem value="DISPATCHED">Dispatched</SelectItem>
-              <SelectItem value="CANCELLED">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('shipments')}
+          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'shipments'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Truck className="w-4 h-4" />
+          Dispatch Shipments &amp; Gate Passes ({totalCount})
+        </button>
       </div>
 
-      {/* Main Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-        <Table>
-          <TableHeader className="bg-slate-50/75">
-            <TableRow>
-              <TableHead className="font-semibold text-xs text-slate-600">Dispatch Order #</TableHead>
-              <TableHead className="font-semibold text-xs text-slate-600">Customer</TableHead>
-              <TableHead className="font-semibold text-xs text-slate-600">Source Warehouse</TableHead>
-              <TableHead className="font-semibold text-xs text-slate-600">Vehicle & LR #</TableHead>
-              <TableHead className="font-semibold text-xs text-slate-600">Status</TableHead>
-              <TableHead className="text-right font-semibold text-xs text-slate-600">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
+      {/* TAB 1: OUTBOUND DELIVERY CHALLANS (Image 2 Match) */}
+      {activeTab === 'challans' && (
+        <div className="bg-white rounded-b-xl border border-slate-200 border-t-0 shadow-xs overflow-hidden">
+          <Table>
+            <TableHeader className="bg-slate-50/80 border-b border-slate-200">
               <TableRow>
-                <TableCell colSpan={6} className="h-36 text-center text-slate-500">
-                  <div className="flex items-center justify-center gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
-                    <span>Loading dispatches...</span>
-                  </div>
-                </TableCell>
+                <TableHead className="text-xs font-semibold text-slate-700">Challan No &amp; Date</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-700">Customer Consignee</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-700">Work Order &amp; Packing List</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-700 text-right">Dispatched Length</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-700">Vehicle / Transport</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-700">Status</TableHead>
+                <TableHead className="text-right text-xs font-semibold text-slate-700">Statutory Documents</TableHead>
               </TableRow>
-            ) : dispatches.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-36 text-center text-slate-500">
-                  <div className="flex flex-col items-center justify-center gap-1.5">
-                    <Truck className="w-7 h-7 text-slate-400" />
-                    <p className="font-medium text-slate-700">No dispatch shipments found</p>
-                    <p className="text-xs text-slate-400">
-                      Create an outbound dispatch to generate official delivery challans and gate passes.
-                    </p>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : (
-              dispatches.map((disp) => (
-                <TableRow key={disp._id} className="hover:bg-slate-50/60 transition-colors">
-                  <TableCell>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xs">
-                        DSP
-                      </div>
-                      <div>
-                        <span className="font-bold text-slate-900 text-sm">
-                          {disp.dispatchNumber}
-                        </span>
-                        <p className="text-xs text-slate-400">
-                          {disp.createdAt ? new Date(disp.createdAt).toLocaleDateString() : 'N/A'}
-                        </p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium text-slate-900 text-sm">
-                      {disp.customerId?.name || 'Customer Consignee'}
-                    </div>
-                    {disp.customerId?.code && (
-                      <div className="text-xs text-slate-500">
-                        {disp.customerId.code}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className="font-medium text-slate-800 text-sm">
-                      {disp.sourceWarehouseId?.name || 'Finished Goods'}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium text-slate-900 text-sm">
-                      {disp.vehicleNumber || 'No truck entered'}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {disp.lrNumber ? `LR: ${disp.lrNumber}` : disp.transporterName || ''}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {getDispatchStatusBadge(disp.status)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        nativeButton={false}
-                        render={(props) => (
-                          <div
-                            {...props}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </div>
-                        )}
-                      />
-                      <DropdownMenuContent align="end" className="w-52">
-                        {disp.status === 'DRAFT' && (
-                          <DropdownMenuItem onClick={() => handlePostDispatch(disp._id)} className="cursor-pointer gap-2 text-emerald-600 font-medium">
-                            <Send className="w-4 h-4" /> Post & Release Gate Pass
-                          </DropdownMenuItem>
-                        )}
+            </TableHeader>
 
-                        <DropdownMenuItem onClick={() => handleGenerateChallan(disp._id)} className="cursor-pointer gap-2 text-blue-600">
-                          <FileText className="w-4 h-4" /> Generate Delivery Challan
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+            <TableBody>
+              {loadingChallans ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-12 text-center text-xs text-slate-400">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-600 mb-2" />
+                    Loading delivery challans...
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : outboundChallans.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-14 text-center text-slate-500 text-xs">
+                    <FileCheck2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="font-semibold text-slate-800">No delivery challans generated yet.</p>
+                    <p className="text-slate-400 mt-1">
+                      Finalize drums in <strong>Packaging</strong> to generate Outbound Delivery Challans with Material Consumption Sheets.
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                outboundChallans.map((oc) => (
+                  <TableRow key={oc._id} className="hover:bg-slate-50/60">
+                    <TableCell className="py-3">
+                      <div className="font-mono font-bold text-xs text-slate-900">
+                        {oc.challanNumber}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {oc.challanDate ? new Date(oc.challanDate).toLocaleDateString('en-GB') : '—'}
+                      </div>
+                    </TableCell>
 
-        {/* Pagination Bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-slate-50/50 border-t border-slate-200 text-xs text-slate-500">
-          <div>
-            Showing <span className="font-semibold text-slate-700">{dispatches.length}</span> of{' '}
-            <span className="font-semibold text-slate-700">{totalCount}</span> Dispatches
+                    <TableCell className="py-3">
+                      <div className="font-semibold text-xs text-slate-900">
+                        {oc.customerId?.name || 'Customer'}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-500">
+                        GSTIN: {oc.customerId?.gstin || '05AAMCA4908L1ZG'}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="py-3 text-xs text-slate-700">
+                      <div className="font-mono text-slate-900">
+                        WO: {oc.workOrderId?.workOrderNumber || 'MF-2026-01'}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        PL: {oc.packingListId?.packingListNumber || 'MF/PL/389'}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="py-3 text-right font-mono font-bold text-xs text-indigo-700">
+                      {oc.totalLengthMeters ? oc.totalLengthMeters.toLocaleString('en-IN') : '1,997'} m
+                    </TableCell>
+
+                    <TableCell className="py-3 text-xs text-slate-600">
+                      <div className="font-mono font-semibold text-slate-900">
+                        {oc.vehicleNumber || 'UP17BT 0896'}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {oc.placeOfSupply || 'Haridwar-Uttarakhand'}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          oc.status === 'DELIVERED'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}
+                      >
+                        {oc.status || 'DISPATCHED'}
+                      </span>
+                    </TableCell>
+
+                    <TableCell className="py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Packing List (Image 1) */}
+                        {oc.packingListId && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedPackingListId(oc.packingListId?._id || oc.packingListId)}
+                            className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-orange-700 hover:border-orange-300"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-orange-600" />
+                            Packing List (Image 1)
+                          </Button>
+                        )}
+
+                        {/* Material Consumption Sheet (Image 2) */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSelectedChallanId(oc._id)}
+                          className="h-8 text-xs px-2.5 gap-1.5 text-emerald-700 bg-emerald-50/50 hover:bg-emerald-100 hover:text-emerald-800 border-emerald-200 shadow-xs font-semibold"
+                        >
+                          <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Consumption Sheet (Image 2)
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* TAB 2: DISPATCH SHIPMENTS */}
+      {activeTab === 'shipments' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search Dispatch # or Vehicle..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 h-9 text-xs bg-slate-50/50"
+              />
+            </div>
+
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <Select value={selectedStatus} onValueChange={(val) => { setSelectedStatus(val); setPage(1); }}>
+                <SelectTrigger className="w-full sm:w-44 h-9 text-xs">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL" className="text-xs">All Status</SelectItem>
+                  <SelectItem value="DRAFT" className="text-xs">Draft</SelectItem>
+                  <SelectItem value="DISPATCHED" className="text-xs">Dispatched</SelectItem>
+                  <SelectItem value="CANCELLED" className="text-xs">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="h-8 text-xs"
-            >
-              Previous
-            </Button>
-            <span className="px-2 text-slate-600 font-medium">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              className="h-8 text-xs"
-            >
-              Next
-            </Button>
+
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <Table>
+              <TableHeader className="bg-slate-50/75 border-b border-slate-200">
+                <TableRow>
+                  <TableHead className="text-xs font-semibold text-slate-700">Dispatch Order #</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700">Customer</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700">Source Warehouse</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700">Vehicle &amp; LR #</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700">Status</TableHead>
+                  <TableHead className="text-right text-xs font-semibold text-slate-700">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-400">
+                      Loading dispatches...
+                    </TableCell>
+                  </TableRow>
+                ) : dispatches.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">
+                      No dispatch shipments found.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  dispatches.map((disp) => (
+                    <TableRow key={disp._id} className="hover:bg-slate-50/50">
+                      <TableCell className="py-2.5">
+                        <div className="font-mono font-bold text-xs text-slate-900">{disp.dispatchNumber}</div>
+                        <span className="text-[11px] text-slate-400">
+                          {disp.createdAt ? new Date(disp.createdAt).toLocaleDateString() : '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-2.5 text-xs font-medium text-slate-900">
+                        {disp.customerId?.name || 'Customer'}
+                      </TableCell>
+                      <TableCell className="py-2.5 text-xs text-slate-700">
+                        {disp.sourceWarehouseId?.name || 'Finished Goods'}
+                      </TableCell>
+                      <TableCell className="py-2.5 text-xs text-slate-700">
+                        <div className="font-mono font-semibold">{disp.vehicleNumber || '—'}</div>
+                        <span className="text-[11px] text-slate-400">{disp.lrNumber ? `LR: ${disp.lrNumber}` : ''}</span>
+                      </TableCell>
+                      <TableCell className="py-2.5">
+                        <Badge variant="outline" className="text-[11px]">
+                          {disp.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {disp.status === 'DRAFT' && (
+                            <Button
+                              size="sm"
+                              onClick={() => handlePostDispatch(disp._id)}
+                              className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                            >
+                              <Send className="w-3 h-3" />
+                              Dispatch
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleGenerateChallan(disp._id)}
+                            className="h-7 text-xs gap-1 text-indigo-700 border-indigo-200"
+                          >
+                            <FileText className="w-3 h-3" />
+                            Generate Challan
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Create Dialog */}
+      {/* Dialog: Create Dispatch */}
       <CreateDispatchDialog
         open={createDispatchOpen}
         onOpenChange={setCreateDispatchOpen}
         customers={customers}
         workOrders={workOrders}
         warehouses={warehouses}
-        onSuccess={handleCreateDispatch}
+        onSuccess={() => {
+          fetchDispatches();
+          fetchOutboundChallans();
+        }}
       />
+
+      {/* Dialog: Material Consumption Sheet (Image 2) */}
+      {selectedChallanId && (
+        <MaterialConsumptionSheetDialog
+          challanId={selectedChallanId}
+          open={Boolean(selectedChallanId)}
+          onOpenChange={(val) => !val && setSelectedChallanId(null)}
+        />
+      )}
+
+      {/* Dialog: Packing List Document (Image 1) */}
+      {selectedPackingListId && (
+        <PackingListDocumentDialog
+          packingListId={selectedPackingListId}
+          open={Boolean(selectedPackingListId)}
+          onOpenChange={(val) => !val && setSelectedPackingListId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -40,6 +40,7 @@ import {
 
 import { CreateCustomerDialog } from '@/components/customers/create-customer-dialog';
 import { EditCustomerDialog } from '@/components/customers/edit-customer-dialog';
+import { CustomerStockOverviewDialog } from '@/components/customers/customer-stock-overview-dialog';
 
 import {
   Building2,
@@ -58,6 +59,7 @@ import {
   CheckCircle2,
   XCircle,
   Power,
+  Layers,
 } from 'lucide-react';
 
 export default function CustomersPage() {
@@ -73,6 +75,7 @@ export default function CustomersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
+  const [selectedStockCustomer, setSelectedStockCustomer] = useState(null);
   const [customerMode, setCustomerMode] = useState('view');
 
   const fetchCustomers = useCallback(
@@ -248,7 +251,7 @@ export default function CustomersPage() {
                   <TableHead className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                     Status
                   </TableHead>
-                  <TableHead className="w-20 text-right text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  <TableHead className="w-56 text-right text-xs font-semibold text-slate-700 uppercase tracking-wider">
                     Actions
                   </TableHead>
                 </TableRow>
@@ -357,46 +360,66 @@ export default function CustomersPage() {
 
                         {/* Actions */}
                         <TableCell className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={(props) => (
-                                <Button
-                                  {...props}
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-slate-400 hover:text-slate-800 cursor-pointer"
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSelectedStockCustomer(cust)}
+                              className="h-8 text-xs font-semibold px-2.5 gap-1.5 text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 hover:text-indigo-800 border-indigo-200 cursor-pointer shadow-xs"
+                            >
+                              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                              Stock &amp; Challans
+                            </Button>
+
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                render={(props) => (
+                                  <Button
+                                    {...props}
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-slate-400 hover:text-slate-800 cursor-pointer"
+                                  >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              />
+
+                              <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuLabel className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                                  Customer Actions
+                                </DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+
+                                <DropdownMenuItem
+                                  onClick={() => setSelectedStockCustomer(cust)}
+                                  className="text-xs cursor-pointer text-indigo-700 font-medium"
                                 >
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </Button>
-                              )}
-                            />
+                                  <Layers className="w-3.5 h-3.5 mr-2 text-indigo-600" />
+                                  View Stock &amp; Challans
+                                </DropdownMenuItem>
 
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuLabel className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                                Customer Actions
-                              </DropdownMenuLabel>
-                              <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setEditingCustomer(cust);
+                                    setCustomerMode('edit');
+                                  }}
+                                  className="text-xs cursor-pointer text-slate-700"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5 mr-2 text-slate-500" />
+                                  Edit Customer Details
+                                </DropdownMenuItem>
 
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setEditingCustomer(cust);
-                                  setCustomerMode('edit');
-                                }}
-                                className="text-xs cursor-pointer text-slate-700"
-                              >
-                                <Edit2 className="w-3.5 h-3.5 mr-2 text-slate-500" />
-                                Edit Customer Details
-                              </DropdownMenuItem>
-
-                              <DropdownMenuItem
-                                onClick={() => handleToggleStatus(cust)}
-                                className="text-xs cursor-pointer text-slate-700"
-                              >
-                                <Power className="w-3.5 h-3.5 mr-2 text-slate-500" />
-                                {cust.isActive ? 'Deactivate Customer' : 'Reactivate Customer'}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                                <DropdownMenuItem
+                                  onClick={() => handleToggleStatus(cust)}
+                                  className="text-xs cursor-pointer text-slate-700"
+                                >
+                                  <Power className="w-3.5 h-3.5 mr-2 text-slate-500" />
+                                  {cust.isActive ? 'Deactivate Customer' : 'Reactivate Customer'}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -455,6 +478,15 @@ export default function CustomersPage() {
         initialMode={customerMode}
         onSuccess={() => fetchCustomers(pagination.page)}
       />
+
+      {/* Customer Stock & Challans Overview Dialog */}
+      {selectedStockCustomer && (
+        <CustomerStockOverviewDialog
+          customer={selectedStockCustomer}
+          open={Boolean(selectedStockCustomer)}
+          onOpenChange={(open) => !open && setSelectedStockCustomer(null)}
+        />
+      )}
     </div>
   );
 }

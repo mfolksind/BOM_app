@@ -17,6 +17,21 @@ export const inboundChallanLineInputSchema = z.object({
   remarks: z.string().trim().optional(),
 });
 
+export const inboundDrumReceiptSchema = z.object({
+  quantity: z.coerce.number().int().positive().default(1),
+  drumSize: z.string().trim().optional(),
+  flangeDiameterMm: z.coerce.number().positive().optional(),
+  barrelDiameterMm: z.coerce.number().positive().optional(),
+  traverseWidthMm: z.coerce.number().positive().optional(),
+  drumType: z.enum(['WOODEN', 'STEEL', 'PLASTIC']).default('WOODEN'),
+  refRgpNumber: z.string().trim().optional(),
+  prefix: z.string().trim().optional(),
+  startingNumber: z.coerce.number().int().optional(),
+  tareWeightKg: z.coerce.number().positive().optional(),
+  capacityMeters: z.coerce.number().positive().optional(),
+  remarks: z.string().trim().optional(),
+});
+
 export const createInboundChallanSchema = z
   .object({
     customerChallanNumber: z.string().trim().min(1, 'Customer challan number is required'),
@@ -35,7 +50,8 @@ export const createInboundChallanSchema = z
     transporterName: z.string().trim().optional(),
     lrNumber: z.string().trim().optional(),
     remarks: z.string().trim().optional(),
-    lines: z.array(inboundChallanLineInputSchema).min(1, 'At least one material line is required'),
+    lines: z.array(inboundChallanLineInputSchema).default([]),
+    drums: inboundDrumReceiptSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.ownerType === 'CUSTOMER' && !data.customerId) {
@@ -43,6 +59,13 @@ export const createInboundChallanSchema = z
         code: z.ZodIssueCode.custom,
         path: ['customerId'],
         message: 'Customer ID is required for customer-owned inbound receipts',
+      });
+    }
+    if ((!data.lines || data.lines.length === 0) && (!data.drums || !data.drums.quantity)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['lines'],
+        message: 'At least one material line or returnable drum entry is required',
       });
     }
   });

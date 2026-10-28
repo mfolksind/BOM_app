@@ -26,6 +26,7 @@ import {
   Truck,
   ClipboardList,
   Cog,
+  Workflow,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -70,6 +71,11 @@ const navSections = [
         icon: Layers,
       },
       {
+        title: 'Process Stages',
+        href: '/dashboard/process-stages',
+        icon: Workflow,
+      },
+      {
         title: 'Machines & Equipment',
         href: '/dashboard/machines',
         icon: Cog,
@@ -77,13 +83,23 @@ const navSections = [
     ],
   },
   {
-    title: 'Orders & Production',
+    title: 'Inventory & Stock',
     items: [
+      {
+        title: 'Global Stock Dashboard',
+        href: '/dashboard/stock',
+        icon: Warehouse,
+      },
       {
         title: 'Inbound Challans',
         href: '/dashboard/inbound-challans',
         icon: ClipboardList,
       },
+    ],
+  },
+  {
+    title: 'Orders & Production',
+    items: [
       {
         title: 'Work Orders',
         href: '/dashboard/work-orders',

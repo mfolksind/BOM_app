@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Cog, Plus, Layers, Activity } from 'lucide-react';
+import { Cog, Plus, Layers, Activity, ShieldCheck, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess }) {
@@ -33,6 +33,34 @@ export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess
     speedMetersPerMinute: '',
     location: '',
   });
+  const [customTests, setCustomTests] = useState([]);
+
+  const handleAddTest = () => {
+    setCustomTests((prev) => [
+      ...prev,
+      {
+        testName: '',
+        testType: 'DIMENSIONAL',
+        unit: 'mm',
+        minValue: '',
+        maxValue: '',
+        standardSpecification: '',
+        isMandatory: true,
+      },
+    ]);
+  };
+
+  const handleUpdateTest = (index, field, value) => {
+    setCustomTests((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const handleRemoveTest = (index) => {
+    setCustomTests((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -48,6 +76,18 @@ export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess
 
     setLoading(true);
     try {
+      const validTests = customTests
+        .filter((t) => t.testName?.trim())
+        .map((t) => ({
+          testName: t.testName.trim(),
+          testType: t.testType || 'OTHER',
+          unit: t.unit?.trim() || undefined,
+          minValue: t.minValue !== '' && !isNaN(Number(t.minValue)) ? Number(t.minValue) : undefined,
+          maxValue: t.maxValue !== '' && !isNaN(Number(t.maxValue)) ? Number(t.maxValue) : undefined,
+          standardSpecification: t.standardSpecification?.trim() || undefined,
+          isMandatory: Boolean(t.isMandatory),
+        }));
+
       const payload = {
         code: formData.code.trim().toUpperCase(),
         name: formData.name.trim(),
@@ -57,12 +97,13 @@ export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess
         capacityPerShift: formData.capacityPerShift ? parseFloat(formData.capacityPerShift) : undefined,
         speedMetersPerMinute: formData.speedMetersPerMinute ? parseFloat(formData.speedMetersPerMinute) : undefined,
         location: formData.location.trim() || undefined,
+        customTests: validTests,
         isActive: true,
       };
 
       const res = await api.post('/machines', payload);
       if (res?.success || res?.data) {
-        toast.success(`Machine ${payload.code} registered successfully`);
+        toast.success(`Machine ${payload.code} registered successfully with ${validTests.length} tests`);
         if (onSuccess) onSuccess(res?.data);
         onOpenChange(false);
         setFormData({
@@ -75,6 +116,7 @@ export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess
           speedMetersPerMinute: '',
           location: '',
         });
+        setCustomTests([]);
       }
     } catch (err) {
       toast.error(err.message || 'Failed to register machine');
@@ -289,6 +331,116 @@ export function CreateMachineDialog({ open, onOpenChange, stages = [], onSuccess
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+            {/* Quality Tests Checklist (Free Hand) */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                    Machine Quality Tests (Free Hand)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Define any test parameters for batches running on this machine (e.g. Diameter, Resistance, Elongation).
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddTest}
+                  className="h-7 text-xs border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 gap-1 font-medium cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-600" />
+                  Add Test
+                </Button>
+              </div>
+
+              {customTests.length === 0 ? (
+                <div className="p-4 rounded-lg border border-dashed border-slate-200 text-center text-xs text-slate-400">
+                  No tests defined. Click "+ Add Test" to create custom quality checks for this machine.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {customTests.map((test, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-700">Test #{idx + 1}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveTest(idx)}
+                          className="h-6 w-6 p-0 text-slate-400 hover:text-rose-600 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Test Name (e.g. Conductor Resistance)"
+                          value={test.testName}
+                          onChange={(e) => handleUpdateTest(idx, 'testName', e.target.value)}
+                          className="h-8 text-xs bg-white"
+                          required
+                        />
+                        <Select
+                          value={test.testType}
+                          onValueChange={(val) => handleUpdateTest(idx, 'testType', val)}
+                        >
+                          <SelectTrigger className="h-8 text-xs bg-white">
+                            <SelectValue placeholder="Test Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DIMENSIONAL">Dimensional</SelectItem>
+                            <SelectItem value="ELECTRICAL">Electrical</SelectItem>
+                            <SelectItem value="MECHANICAL">Mechanical</SelectItem>
+                            <SelectItem value="VISUAL">Visual</SelectItem>
+                            <SelectItem value="OTHER">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input
+                          placeholder="Unit (e.g. ohm/km, mm)"
+                          value={test.unit}
+                          onChange={(e) => handleUpdateTest(idx, 'unit', e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="Min Val"
+                          value={test.minValue}
+                          onChange={(e) => handleUpdateTest(idx, 'minValue', e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="Max Val"
+                          value={test.maxValue}
+                          onChange={(e) => handleUpdateTest(idx, 'maxValue', e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+
+                      <Input
+                        placeholder="Standard Spec (e.g. IS 8130 Clause 6.1)"
+                        value={test.standardSpecification}
+                        onChange={(e) => handleUpdateTest(idx, 'standardSpecification', e.target.value)}
+                        className="h-8 text-xs bg-white"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

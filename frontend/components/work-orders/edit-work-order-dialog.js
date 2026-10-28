@@ -524,14 +524,16 @@ export function EditWorkOrderDialog({
                         <TableRow>
                           <TableHead className="text-xs font-semibold text-slate-700">Material</TableHead>
                           <TableHead className="text-right text-xs font-semibold text-slate-700">Required</TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-700">Available</TableHead>
+                          <TableHead className="text-right text-xs font-semibold text-slate-700">Available (Global)</TableHead>
                           <TableHead className="text-right text-xs font-semibold text-slate-700">Shortage</TableHead>
                           <TableHead className="text-center text-xs font-semibold text-slate-700">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {availability.materials.map((m, idx) => {
-                          const isShort = m.shortage > 0;
+                          const shortageVal = m.shortage ?? m.shortageQuantity ?? 0;
+                          const isShort = shortageVal > 0;
+                          const availableVal = m.availableStock ?? m.eligibleAvailableQuantity ?? 0;
                           return (
                             <TableRow key={idx} className="hover:bg-slate-50/60">
                               <TableCell>
@@ -541,11 +543,16 @@ export function EditWorkOrderDialog({
                               <TableCell className="text-right text-xs text-slate-700 font-medium">
                                 {m.requiredQuantity?.toFixed(2)} {m.unit}
                               </TableCell>
-                              <TableCell className="text-right text-xs text-slate-700 font-medium">
-                                {m.availableStock?.toFixed(2)} {m.unit}
+                              <TableCell className="text-right text-xs font-medium">
+                                <span className="text-slate-900 font-semibold">{availableVal.toFixed(2)} {m.unit}</span>
+                                {m.customerAvailableQuantity > 0 && (
+                                  <span className="block text-[10px] text-slate-400 font-normal">
+                                    Customer: {m.customerAvailableQuantity.toFixed(2)} {m.unit}
+                                  </span>
+                                )}
                               </TableCell>
                               <TableCell className={`text-right text-xs font-bold ${isShort ? 'text-rose-600' : 'text-emerald-700'}`}>
-                                {isShort ? `-${m.shortage.toFixed(2)}` : '0.00'} {m.unit}
+                                {isShort ? `-${shortageVal.toFixed(2)}` : '0.00'} {m.unit}
                               </TableCell>
                               <TableCell className="text-center">
                                 <Badge

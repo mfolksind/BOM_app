@@ -13,6 +13,15 @@ export class MachineService {
     speedMetersPerMinute?: number;
     location?: string;
     specifications?: Record<string, unknown>;
+    customTests?: Array<{
+      testName: string;
+      testType?: string;
+      unit?: string;
+      standardSpecification?: string;
+      minValue?: number;
+      maxValue?: number;
+      isMandatory?: boolean;
+    }>;
     isActive?: boolean;
   }): Promise<IMachine> {
     const existing = await MachineModel.findOne({ code: dto.code.toUpperCase() });
@@ -30,6 +39,7 @@ export class MachineService {
       speedMetersPerMinute: dto.speedMetersPerMinute,
       location: dto.location,
       specifications: dto.specifications || {},
+      customTests: dto.customTests || [],
       isActive: dto.isActive !== undefined ? dto.isActive : true,
     });
 
@@ -103,6 +113,15 @@ export class MachineService {
       speedMetersPerMinute: number;
       location: string;
       specifications: Record<string, unknown>;
+      customTests: Array<{
+        testName: string;
+        testType?: string;
+        unit?: string;
+        standardSpecification?: string;
+        minValue?: number;
+        maxValue?: number;
+        isMandatory?: boolean;
+      }>;
       isActive: boolean;
     }>,
   ): Promise<IMachine> {
@@ -120,6 +139,7 @@ export class MachineService {
       machine.speedMetersPerMinute = dto.speedMetersPerMinute;
     if (dto.location !== undefined) machine.location = dto.location;
     if (dto.specifications !== undefined) machine.specifications = dto.specifications;
+    if (dto.customTests !== undefined) machine.customTests = dto.customTests;
     if (dto.isActive !== undefined) machine.isActive = dto.isActive;
 
     await machine.save();

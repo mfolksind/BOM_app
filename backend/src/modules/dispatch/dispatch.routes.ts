@@ -63,3 +63,13 @@ outboundChallanRoutes.get(
   validate(outboundChallanIdParamSchema),
   (req, res, next) => dispatchController.getOutboundChallanPrintData(req, res, next),
 );
+outboundChallanRoutes.get(
+  '/:id/consumption-sheet',
+  validate(outboundChallanIdParamSchema),
+  (req, res, next) => dispatchController.getOutboundChallanConsumptionSheet(req, res, next),
+);
+outboundChallanRoutes.post(
+  '/:id/consumption-sheet',
+  validate(outboundChallanIdParamSchema),
+  (req, res, next) => dispatchController.saveOutboundChallanConsumptionSheet(req, res, next),
+);

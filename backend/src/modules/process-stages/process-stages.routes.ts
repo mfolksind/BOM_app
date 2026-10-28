@@ -18,6 +18,7 @@ router.post(
   validateRequest({ body: createProcessStageSchema }),
   processStagesController.createProcessStage,
 );
+router.post('/seed-defaults', processStagesController.seedDefaultStages);
 router.get(
   '/',
   validateRequest({ query: processStageQuerySchema }),

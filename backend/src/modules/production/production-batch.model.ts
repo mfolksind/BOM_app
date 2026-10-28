@@ -4,11 +4,36 @@ export type ProductionBatchStatus = 'PENDING' | 'IN_PROCESS' | 'COMPLETED' | 'HA
 
 export type ProductionShift = 'SHIFT_A' | 'SHIFT_B' | 'SHIFT_C';
 
+export type BatchTestStatus = 'NOT_TESTED' | 'TEST_PASSED' | 'TEST_FAILED';
+
+export interface IBatchTestItem {
+  testName: string;
+  testType?: string;
+  unit?: string;
+  standardSpecification?: string;
+  minValue?: number;
+  maxValue?: number;
+  expectedValue?: string;
+  actualValue?: string;
+  result: 'PASSED' | 'FAILED' | 'PENDING';
+  remarks?: string;
+}
+
+export interface IBatchReworkEntry {
+  reworkNumber: number;
+  failedAt: Date;
+  reason: string;
+  tests?: IBatchTestItem[];
+  resolvedAt?: Date;
+  operatorNotes?: string;
+}
+
 export interface IProductionBatch extends Document {
   batchNumber: string;
   productionOrderId: mongoose.Types.ObjectId;
   workOrderId?: mongoose.Types.ObjectId;
   processStageId: mongoose.Types.ObjectId;
+  machineId?: mongoose.Types.ObjectId;
   machineCode: string;
   operatorId?: mongoose.Types.ObjectId;
   plannedQuantity: number;
@@ -16,6 +41,13 @@ export interface IProductionBatch extends Document {
   unit: string;
   status: ProductionBatchStatus;
   shift?: ProductionShift;
+  testStatus?: BatchTestStatus;
+  tests?: IBatchTestItem[];
+  testReportNumber?: string;
+  testedBy?: mongoose.Types.ObjectId;
+  testedAt?: Date;
+  reworkCount?: number;
+  reworkHistory?: IBatchReworkEntry[];
   startedAt?: Date;
   completedAt?: Date;
   remarks?: string;
@@ -45,6 +77,10 @@ const productionBatchSchema = new Schema<IProductionBatch>(
       type: Schema.Types.ObjectId,
       ref: 'ProcessStage',
       required: [true, 'Process Stage reference is required'],
+    },
+    machineId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Machine',
     },
     machineCode: {
       type: String,
@@ -80,6 +116,50 @@ const productionBatchSchema = new Schema<IProductionBatch>(
     shift: {
       type: String,
     },
+    testStatus: {
+      type: String,
+      enum: ['NOT_TESTED', 'TEST_PASSED', 'TEST_FAILED'],
+      default: 'NOT_TESTED',
+    },
+    tests: [
+      {
+        testName: { type: String, required: true, trim: true },
+        testType: { type: String, trim: true },
+        unit: { type: String, trim: true },
+        standardSpecification: { type: String, trim: true },
+        minValue: { type: Number },
+        maxValue: { type: Number },
+        expectedValue: { type: String, trim: true },
+        actualValue: { type: String, trim: true },
+        result: { type: String, enum: ['PASSED', 'FAILED', 'PENDING'], default: 'PENDING' },
+        remarks: { type: String, trim: true },
+      },
+    ],
+    testReportNumber: {
+      type: String,
+      trim: true,
+    },
+    testedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    testedAt: {
+      type: Date,
+    },
+    reworkCount: {
+      type: Number,
+      default: 0,
+    },
+    reworkHistory: [
+      {
+        reworkNumber: { type: Number },
+        failedAt: { type: Date, default: Date.now },
+        reason: { type: String, trim: true },
+        tests: { type: Array, default: [] },
+        resolvedAt: { type: Date },
+        operatorNotes: { type: String, trim: true },
+      },
+    ],
     startedAt: {
       type: Date,
     },

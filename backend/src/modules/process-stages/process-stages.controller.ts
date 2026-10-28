@@ -69,6 +69,18 @@ export class ProcessStagesController {
     await processStagesService.deleteProcessStage(req.params.id, req.user!._id.toString(), req.ip);
     return ApiResponseUtil.success(res, null, 'Process stage deleted successfully');
   });
+
+  seedDefaultStages = asyncHandler(async (req: Request, res: Response) => {
+    const created = await processStagesService.seedDefaultStages(
+      req.user?._id?.toString(),
+      req.ip,
+    );
+    return ApiResponseUtil.success(
+      res,
+      created,
+      `Seeded ${created.length} default process stages successfully`,
+    );
+  });
 }
 
 export const processStagesController = new ProcessStagesController();

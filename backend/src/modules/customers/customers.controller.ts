@@ -59,6 +59,16 @@ export class CustomersController {
     await customersService.deleteCustomer(req.params.id, req.user!._id.toString(), req.ip);
     return ApiResponseUtil.success(res, null, 'Customer deleted successfully');
   });
+
+  getCustomerStockOverview = asyncHandler(async (req: Request, res: Response) => {
+    const customerId = req.params.customerId || req.params.id;
+    const overview = await customersService.getCustomerStockOverview(customerId);
+    return ApiResponseUtil.success(
+      res,
+      overview,
+      'Customer stock and challan overview retrieved successfully',
+    );
+  });
 }
 
 export const customersController = new CustomersController();

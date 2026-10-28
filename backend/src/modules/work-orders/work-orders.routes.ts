@@ -30,6 +30,11 @@ router.get(
   workOrdersController.listWorkOrders.bind(workOrdersController),
 );
 
+router.post(
+  '/preview/material-availability',
+  workOrdersController.previewMaterialAvailability.bind(workOrdersController),
+);
+
 router.get(
   '/:id',
   validateRequest(workOrderIdParamSchema),

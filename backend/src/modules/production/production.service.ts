@@ -22,6 +22,7 @@ import { MachineModel } from '../machines/machine.model';
 import { DrumModel } from '../packing/drum.model';
 import { DrumMovementModel } from '../packing/drum-movement.model';
 import { BomItemModel } from '../bom/bom-item.model';
+import { ProcessStageModel } from '../shared/process-stage.model';
 import { TransactionUtil } from '../../common/utils';
 import { BadRequestError, NotFoundError, ConflictError } from '../../common/errors';
 
@@ -377,6 +378,254 @@ export class ProductionService {
     }
 
     return batch;
+  }
+
+  /**
+   * List production batches with optional filters
+   */
+  async listProductionBatches(query: {
+    productionOrderId?: string;
+    machineId?: string;
+    status?: string;
+    testStatus?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const filter: Record<string, unknown> = {};
+    if (query.productionOrderId) {
+      filter.productionOrderId = new mongoose.Types.ObjectId(query.productionOrderId);
+    }
+    if (query.machineId) {
+      filter.machineId = new mongoose.Types.ObjectId(query.machineId);
+    }
+    if (query.status && query.status !== 'ALL') {
+      filter.status = query.status;
+    }
+    if (query.testStatus && query.testStatus !== 'ALL') {
+      filter.testStatus = query.testStatus;
+    }
+
+    const [items, total] = await Promise.all([
+      ProductionBatchModel.find(filter)
+        .populate('productionOrderId')
+        .populate('processStageId')
+        .populate('machineId')
+        .populate('operatorId', 'firstName lastName employeeCode email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      ProductionBatchModel.countDocuments(filter),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  /**
+   * Pass Quality Tests on Machine Batch -> Complete batch, Release machine, and determine next machine stage
+   */
+  async passBatchTest(
+    batchId: string,
+    dto: {
+      tests?: Array<{
+        testName: string;
+        testType?: string;
+        unit?: string;
+        standardSpecification?: string;
+        minValue?: number;
+        maxValue?: number;
+        expectedValue?: string;
+        actualValue?: string;
+        result?: 'PASSED' | 'FAILED' | 'PENDING';
+        remarks?: string;
+      }>;
+      testReportNumber?: string;
+      completedQuantity?: number;
+      remarks?: string;
+    },
+    userId?: string,
+  ) {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    if (batch.status === 'COMPLETED') {
+      throw new BadRequestError('Production batch is already COMPLETED');
+    }
+
+    const testRecords = (dto.tests || []).map((t) => ({
+      ...t,
+      result: 'PASSED' as const,
+    }));
+
+    batch.tests = testRecords.length ? testRecords : batch.tests;
+    batch.testStatus = 'TEST_PASSED';
+    batch.status = 'COMPLETED';
+    batch.completedAt = new Date();
+    if (dto.testReportNumber) batch.testReportNumber = dto.testReportNumber.trim();
+    if (userId) batch.testedBy = new mongoose.Types.ObjectId(userId);
+    batch.testedAt = new Date();
+    if (dto.completedQuantity !== undefined && dto.completedQuantity > 0) {
+      batch.completedQuantity = dto.completedQuantity;
+    } else if (!batch.completedQuantity || batch.completedQuantity === 0) {
+      batch.completedQuantity = batch.plannedQuantity;
+    }
+    if (dto.remarks) {
+      batch.remarks = [batch.remarks, `[TEST PASSED]: ${dto.remarks}`].filter(Boolean).join(' | ');
+    }
+    await batch.save();
+
+    // Release machine back to AVAILABLE
+    if (batch.machineId) {
+      await MachineModel.findByIdAndUpdate(batch.machineId, {
+        status: 'AVAILABLE',
+        currentBatchId: null,
+      });
+    }
+
+    // Determine Next Process Stage in Sequence for this Production Order
+    const currentStage = await ProcessStageModel.findById(batch.processStageId);
+    const currentSequence = currentStage?.sequenceOrder || 1;
+
+    // Fetch all process stages sorted by sequenceOrder
+    const allStages = await ProcessStageModel.find({ isActive: true }).sort({ sequenceOrder: 1 });
+    const nextStage = allStages.find((s) => s.sequenceOrder > currentSequence);
+
+    let nextStageInfo = null;
+    if (nextStage) {
+      const availableMachines = await MachineModel.find({
+        processStageIds: nextStage._id,
+        isActive: true,
+      });
+      nextStageInfo = {
+        hasMoreStages: true,
+        nextStageId: nextStage._id,
+        nextStageName: nextStage.name,
+        nextStageCode: nextStage.code,
+        sequenceOrder: nextStage.sequenceOrder,
+        category: nextStage.category,
+        availableMachines: availableMachines.map((m) => ({
+          _id: m._id,
+          code: m.code,
+          name: m.name,
+          status: m.status,
+          capacityPerShift: m.capacityPerShift,
+          speedMetersPerMinute: m.speedMetersPerMinute,
+        })),
+      };
+    }
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionBatch',
+        entityId: batch._id,
+        performedBy: userId,
+        newValues: { testStatus: 'TEST_PASSED', status: 'COMPLETED' },
+      });
+    }
+
+    return {
+      message: nextStageInfo
+        ? `Quality test PASSED! Machine ${batch.machineCode} released. Next machine stage: ${nextStageInfo.nextStageName}.`
+        : `Quality test PASSED! Machine ${batch.machineCode} released. Final stage completed. Ready for packaging.`,
+      batch,
+      nextStage: nextStageInfo,
+      isFinalStage: !nextStageInfo,
+    };
+  }
+
+  /**
+   * Fail Quality Tests on Machine Batch -> Keep / Restart on the SAME machine for rework
+   */
+  async failBatchTest(
+    batchId: string,
+    dto: {
+      reason: string;
+      tests?: Array<{
+        testName: string;
+        testType?: string;
+        unit?: string;
+        standardSpecification?: string;
+        minValue?: number;
+        maxValue?: number;
+        expectedValue?: string;
+        actualValue?: string;
+        result?: 'PASSED' | 'FAILED' | 'PENDING';
+        remarks?: string;
+      }>;
+      testReportNumber?: string;
+      remarks?: string;
+    },
+    userId?: string,
+  ) {
+    const batch = await ProductionBatchModel.findById(batchId);
+    if (!batch) throw new NotFoundError('Production batch not found');
+
+    const newReworkCount = (batch.reworkCount || 0) + 1;
+    const testRecords = (dto.tests || []).map((t) => ({
+      ...t,
+      result: (t.result || 'FAILED') as 'PASSED' | 'FAILED' | 'PENDING',
+    }));
+
+    batch.tests = testRecords.length ? testRecords : batch.tests;
+    batch.testStatus = 'TEST_FAILED';
+    batch.status = 'IN_PROCESS'; // Keep working on the SAME machine
+    batch.reworkCount = newReworkCount;
+    if (dto.testReportNumber) batch.testReportNumber = dto.testReportNumber.trim();
+    if (userId) batch.testedBy = new mongoose.Types.ObjectId(userId);
+    batch.testedAt = new Date();
+
+    if (!batch.reworkHistory) batch.reworkHistory = [];
+    batch.reworkHistory.push({
+      reworkNumber: newReworkCount,
+      failedAt: new Date(),
+      reason: dto.reason,
+      tests: testRecords,
+      operatorNotes: dto.remarks,
+    });
+
+    batch.remarks = [
+      batch.remarks,
+      `[FAILED TEST / REWORK #${newReworkCount} ON SAME MACHINE ${batch.machineCode}]: ${dto.reason}`,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    await batch.save();
+
+    // Ensure machine remains RUNNING on this batch for rework
+    if (batch.machineId) {
+      await MachineModel.findByIdAndUpdate(batch.machineId, {
+        status: 'RUNNING',
+        currentBatchId: batch._id,
+      });
+    }
+
+    if (userId) {
+      await InventoryAuditUtil.record({
+        action: 'UPDATE',
+        entityType: 'ProductionBatch',
+        entityId: batch._id,
+        performedBy: userId,
+        newValues: { testStatus: 'TEST_FAILED', reworkCount: newReworkCount, reason: dto.reason },
+      });
+    }
+
+    return {
+      message: `Quality test marked FAILED. Work restarted on the SAME machine (${batch.machineCode}). Operator can adjust settings and re-test.`,
+      batch,
+      reworkCount: newReworkCount,
+      machineCode: batch.machineCode,
+    };
   }
 
   async reverseBatchWork(

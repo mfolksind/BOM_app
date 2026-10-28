@@ -53,6 +53,11 @@ ordersRouter.post(
   productionController.createProductionBatch.bind(productionController),
 );
 
+ordersRouter.get('/:id/batches', (req, res, next) => {
+  req.query.productionOrderId = req.params.id;
+  return productionController.listProductionBatches(req, res, next);
+});
+
 ordersRouter.post(
   '/:id/material-issues',
   validateRequest(createMaterialIssueSchema),
@@ -65,7 +70,18 @@ ordersRouter.post(
 const batchesRouter = Router();
 batchesRouter.use(authenticate, authorizeRole('SUPER_ADMIN', 'ADMIN'));
 
+batchesRouter.get('/', productionController.listProductionBatches.bind(productionController));
 batchesRouter.get('/:id', productionController.getProductionBatchById.bind(productionController));
+
+batchesRouter.post(
+  '/:id/pass-test',
+  productionController.passBatchTest.bind(productionController),
+);
+
+batchesRouter.post(
+  '/:id/fail-test',
+  productionController.failBatchTest.bind(productionController),
+);
 
 batchesRouter.patch(
   '/:id',

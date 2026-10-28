@@ -183,6 +183,37 @@ export class DispatchController {
     }
   }
 
+  async getOutboundChallanConsumptionSheet(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const sheet = await dispatchService.getOutboundChallanConsumptionSheet(req.params.id);
+      ApiResponseUtil.success(res, sheet, 'Material Consumption Sheet retrieved successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async saveOutboundChallanConsumptionSheet(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const userId = (req.user as unknown as { _id?: string })?._id?.toString();
+      const saved = await dispatchService.saveOutboundChallanConsumptionSheet(
+        req.params.id,
+        req.body,
+        userId,
+      );
+      ApiResponseUtil.success(res, saved, 'Material Consumption Sheet saved successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // ==========================================
   // CUSTOMER & ORDER TRACEABILITY
   // ==========================================

@@ -537,7 +537,8 @@ export class PackingService {
     }
 
     // Finished Goods Availability Check:
-    // Total good cable length produced for this work order
+    // If output is recorded in production stages, enforce that limit;
+    // otherwise fallback to PO/Work Order planned length to allow direct 2-step PO -> Packaging workflow
     const outputs = await ProductionOutputModel.find({
       workOrderId: workOrder._id,
       status: 'POSTED',
@@ -556,7 +557,9 @@ export class PackingService {
       0,
     );
 
-    const availableToPackMeters = Math.max(0, totalGoodOutputMeters - alreadyPackedMeters);
+    const maxAllowedMeters =
+      totalGoodOutputMeters > 0 ? totalGoodOutputMeters : (workOrder.orderedLengthMeters || 1000000);
+    const availableToPackMeters = Math.max(0, maxAllowedMeters - alreadyPackedMeters);
 
     // Validate drum lines
     const drumIds = dto.lines.map((l) => l.drumId);

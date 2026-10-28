@@ -160,6 +160,24 @@ export class WorkOrdersController {
     }
   }
 
+  async previewMaterialAvailability(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const result = await workOrdersService.previewMaterialAvailability(req.body);
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'BOM material availability preview calculated successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async reserveMaterials(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await workOrdersService.reserveMaterials(

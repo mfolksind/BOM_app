@@ -140,6 +140,62 @@ export class ProductionController {
     }
   }
 
+  async listProductionBatches(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await productionService.listProductionBatches(req.query as never);
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Production batches retrieved successfully',
+        data: result.items,
+        pagination: {
+          total: result.total,
+          page: result.page,
+          limit: result.limit,
+          totalPages: result.totalPages,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async passBatchTest(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await productionService.passBatchTest(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: result.message,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async failBatchTest(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await productionService.failBatchTest(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: result.message,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async reverseBatchWork(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await productionService.reverseBatchWork(

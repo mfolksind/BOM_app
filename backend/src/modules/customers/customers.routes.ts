@@ -44,4 +44,6 @@ router.get(
   dispatchController.getCustomerDispatchHistory.bind(dispatchController),
 );
 
+router.get('/:customerId/stock-overview', customersController.getCustomerStockOverview);
+
 export const customerRoutes = router;

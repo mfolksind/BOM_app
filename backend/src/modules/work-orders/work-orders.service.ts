@@ -555,16 +555,27 @@ export class WorkOrdersService {
 
     const availability = await Promise.all(
       requirements.map(async (req) => {
-        // Find customer-owned balances for this material across all warehouses
-        const balances = await InventoryBalanceModel.find({
+        // 1. All warehouse balances for this material across all owners & lots
+        const allBalances = await InventoryBalanceModel.find({
           materialId: req.materialId,
-          ownerType: 'CUSTOMER',
-          customerId: customerId,
         });
 
-        const totalOnHand = balances.reduce((sum, b) => sum + b.quantityOnHand, 0);
-        const totalReserved = balances.reduce((sum, b) => sum + b.quantityReserved, 0);
-        const totalAvailable = balances.reduce((sum, b) => sum + b.quantityAvailable, 0);
+        const globalOnHand = allBalances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        const globalReserved = allBalances.reduce((sum, b) => sum + b.quantityReserved, 0);
+        const globalAvailable = allBalances.reduce((sum, b) => sum + b.quantityAvailable, 0);
+
+        // 2. Specific customer-owned balances for this material
+        const customerBalances = customerId
+          ? allBalances.filter(
+              (b) =>
+                b.ownerType === 'CUSTOMER' &&
+                b.customerId?.toString() === customerId.toString(),
+            )
+          : [];
+
+        const customerOnHand = customerBalances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        const customerReserved = customerBalances.reduce((sum, b) => sum + b.quantityReserved, 0);
+        const customerAvailable = customerBalances.reduce((sum, b) => sum + b.quantityAvailable, 0);
 
         // Find active reservations specifically for this work order
         const thisOrderReservations = await MaterialReservationModel.find({
@@ -576,13 +587,12 @@ export class WorkOrdersService {
           (sum, r) => sum + r.reservedQuantity,
           0,
         );
-        const reservedForOtherOrders = Math.max(0, totalReserved - reservedForThisOrder);
+        const reservedForOtherOrders = Math.max(0, globalReserved - reservedForThisOrder);
 
-        const netEligibleAvailable = totalAvailable;
+        // In Available, provide global stock of warehouse which material-wise exists
+        const availableStock = globalAvailable;
         const shortageQuantity = Number(
-          Math.max(0, req.plannedQuantity - (netEligibleAvailable + reservedForThisOrder)).toFixed(
-            4,
-          ),
+          Math.max(0, req.plannedQuantity - (availableStock + reservedForThisOrder)).toFixed(4),
         );
         const isSufficient = shortageQuantity === 0;
 
@@ -592,10 +602,23 @@ export class WorkOrdersService {
           materialName: req.materialName,
           unit: req.unit,
           requiredQuantity: req.plannedQuantity,
-          totalOnHandQuantity: Number(totalOnHand.toFixed(4)),
-          eligibleAvailableQuantity: Number(netEligibleAvailable.toFixed(4)),
+          // Global Warehouse Stock
+          availableStock: Number(availableStock.toFixed(4)),
+          globalAvailableQuantity: Number(globalAvailable.toFixed(4)),
+          globalOnHandQuantity: Number(globalOnHand.toFixed(4)),
+          globalReservedQuantity: Number(globalReserved.toFixed(4)),
+          // Customer-specific stock
+          customerAvailableQuantity: Number(customerAvailable.toFixed(4)),
+          customerOnHandQuantity: Number(customerOnHand.toFixed(4)),
+          customerReservedQuantity: Number(customerReserved.toFixed(4)),
+          // Backward compatibility
+          totalOnHandQuantity: Number(globalOnHand.toFixed(4)),
+          eligibleAvailableQuantity: customerId
+            ? Number(customerAvailable.toFixed(4))
+            : Number(availableStock.toFixed(4)),
           reservedForThisOrder: Number(reservedForThisOrder.toFixed(4)),
           reservedForOtherOrders: Number(reservedForOtherOrders.toFixed(4)),
+          shortage: shortageQuantity,
           shortageQuantity,
           isSufficient,
         };
@@ -609,6 +632,88 @@ export class WorkOrdersService {
       workOrderNumber,
       customerId,
       isFullySufficient,
+      materials: availability,
+    };
+  }
+
+  /**
+   * Preview material availability and warehouse global stock BEFORE creating work order
+   */
+  async previewMaterialAvailability(dto: {
+    bomVersionId: string;
+    orderedLengthMeters: number;
+    customerId?: string;
+  }) {
+    const bomVersion = await BomVersionModel.findById(dto.bomVersionId);
+    if (!bomVersion) throw new NotFoundError('BOM Version not found');
+
+    const bomItems = await BomItemModel.find({ bomVersionId: bomVersion._id }).sort({
+      stageSequence: 1,
+    });
+    if (!bomItems.length) throw new BadRequestError('BOM Version has no items defined');
+
+    const materialIds = bomItems.map((b) => b.materialId);
+    const materials = await MaterialModel.find({ _id: { $in: materialIds } });
+    const matMap = new Map(materials.map((m) => [m._id.toString(), m]));
+
+    const batchSize = bomVersion.batchSize || 1000;
+    const scaleFactor = dto.orderedLengthMeters / batchSize;
+
+    const availability = await Promise.all(
+      bomItems.map(async (item) => {
+        const mat = matMap.get(item.materialId.toString());
+        const standardQuantity = Number((item.quantityPerUnit * scaleFactor).toFixed(4));
+        const scrapAllowance = Number(
+          (standardQuantity * ((item.scrapTolerancePercentage || 0) / 100)).toFixed(4),
+        );
+        const requiredQuantity = Number((standardQuantity + scrapAllowance).toFixed(4));
+
+        // 1. Global warehouse balances for this material
+        const allBalances = await InventoryBalanceModel.find({
+          materialId: item.materialId,
+        });
+
+        const globalOnHand = allBalances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        const globalReserved = allBalances.reduce((sum, b) => sum + b.quantityReserved, 0);
+        const globalAvailable = allBalances.reduce((sum, b) => sum + b.quantityAvailable, 0);
+
+        // 2. Customer specific balances
+        const customerBalances = dto.customerId
+          ? allBalances.filter(
+              (b) =>
+                b.ownerType === 'CUSTOMER' &&
+                b.customerId?.toString() === dto.customerId?.toString(),
+            )
+          : [];
+
+        const customerOnHand = customerBalances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        const customerAvailable = customerBalances.reduce((sum, b) => sum + b.quantityAvailable, 0);
+
+        const availableStock = globalAvailable;
+        const shortage = Number(Math.max(0, requiredQuantity - availableStock).toFixed(4));
+
+        return {
+          materialId: item.materialId,
+          materialCode: mat?.code || 'UNKNOWN',
+          materialName: mat?.name || 'UNKNOWN',
+          unit: mat?.baseUnit || 'KG',
+          requiredQuantity,
+          availableStock: Number(availableStock.toFixed(4)),
+          globalAvailableQuantity: Number(globalAvailable.toFixed(4)),
+          globalOnHandQuantity: Number(globalOnHand.toFixed(4)),
+          customerAvailableQuantity: Number(customerAvailable.toFixed(4)),
+          customerOnHandQuantity: Number(customerOnHand.toFixed(4)),
+          shortage,
+          isSufficient: shortage === 0,
+        };
+      }),
+    );
+
+    return {
+      bomVersionId: bomVersion._id,
+      bomNumber: bomVersion.bomNumber,
+      orderedLengthMeters: dto.orderedLengthMeters,
+      isFullySufficient: availability.every((a) => a.isSufficient),
       materials: availability,
     };
   }
@@ -644,8 +749,8 @@ export class WorkOrdersService {
 
         if (needed <= 0) continue;
 
-        // Find customer stock balance with available stock
-        const eligibleBalances = await InventoryBalanceModel.find({
+        // 1. First find customer stock balance with available stock
+        const customerBalances = await InventoryBalanceModel.find({
           materialId: req.materialId,
           ownerType: 'CUSTOMER',
           customerId: customerId,
@@ -654,7 +759,7 @@ export class WorkOrdersService {
 
         let remainingToReserve = needed;
 
-        for (const balance of eligibleBalances) {
+        for (const balance of customerBalances) {
           if (remainingToReserve <= 0) break;
 
           const toTake = Math.min(balance.quantityAvailable, remainingToReserve);
@@ -689,7 +794,7 @@ export class WorkOrdersService {
                 unit: req.unit,
                 status: 'ACTIVE',
                 reservedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-                remarks: `Reserved for Work Order ${workOrder.workOrderNumber}`,
+                remarks: `Reserved from Customer stock for Work Order ${workOrder.workOrderNumber}`,
               },
             ],
             { session },
@@ -718,7 +823,7 @@ export class WorkOrdersService {
                 sourceDocumentId: reservation[0]._id,
                 postedAt: new Date(),
                 postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-                remarks: `Stock reserved for Work Order ${workOrder.workOrderNumber}`,
+                remarks: `Stock reserved from Customer stock for Work Order ${workOrder.workOrderNumber}`,
               },
             ],
             { session },
@@ -726,6 +831,89 @@ export class WorkOrdersService {
 
           reservedRecords.push(reservation[0]);
           remainingToReserve -= toTake;
+        }
+
+        // 2. If customer stock was insufficient, fulfill remaining from other available warehouse balances (e.g. FACTORY stock or other available warehouse balances)
+        if (remainingToReserve > 0) {
+          const otherEligibleBalances = await InventoryBalanceModel.find({
+            materialId: req.materialId,
+            _id: { $nin: customerBalances.map((b) => b._id) },
+            quantityAvailable: { $gt: 0 },
+          }).session(session);
+
+          for (const balance of otherEligibleBalances) {
+            if (remainingToReserve <= 0) break;
+
+            const toTake = Math.min(balance.quantityAvailable, remainingToReserve);
+
+            await inventoryBalanceService.reserveStock({
+              materialId: balance.materialId,
+              warehouseId: balance.warehouseId,
+              ownerType: balance.ownerType,
+              customerId: balance.customerId || null,
+              lotId: balance.lotId || null,
+              quantity: toTake,
+              unit: req.unit,
+              session,
+            });
+
+            const reservationNumber = await InventorySequenceUtil.getNextSequence(
+              'MATERIAL_RESERVATION',
+              'RES',
+              session,
+            );
+            const reservation = await MaterialReservationModel.create(
+              [
+                {
+                  reservationNumber,
+                  workOrderId: workOrder._id,
+                  materialId: req.materialId,
+                  warehouseId: balance.warehouseId,
+                  lotId: balance.lotId || null,
+                  ownerType: balance.ownerType,
+                  customerId: balance.customerId || null,
+                  reservedQuantity: toTake,
+                  unit: req.unit,
+                  status: 'ACTIVE',
+                  reservedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+                  remarks: `Reserved from ${balance.ownerType} stock for Work Order ${workOrder.workOrderNumber}`,
+                },
+              ],
+              { session },
+            );
+
+            const txnNumber = await InventorySequenceUtil.getNextSequence(
+              'INVENTORY_TRANSACTION',
+              'TXN',
+              session,
+            );
+            await InventoryTransactionModel.create(
+              [
+                {
+                  transactionNumber: txnNumber,
+                  movementType: 'ADJUSTMENT',
+                  transactionType: 'RESERVATION',
+                  materialId: req.materialId,
+                  warehouseId: balance.warehouseId,
+                  lotId: balance.lotId || null,
+                  ownerType: balance.ownerType,
+                  customerId: balance.customerId || null,
+                  quantity: toTake,
+                  unit: req.unit,
+                  status: 'POSTED',
+                  sourceDocumentType: 'MATERIAL_RESERVATION',
+                  sourceDocumentId: reservation[0]._id,
+                  postedAt: new Date(),
+                  postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+                  remarks: `Stock reserved from ${balance.ownerType} stock for Work Order ${workOrder.workOrderNumber}`,
+                },
+              ],
+              { session },
+            );
+
+            reservedRecords.push(reservation[0]);
+            remainingToReserve -= toTake;
+          }
         }
 
         if (remainingToReserve > 0) {

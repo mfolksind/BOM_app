@@ -2,6 +2,16 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export type MachineStatus = 'AVAILABLE' | 'RUNNING' | 'MAINTENANCE' | 'BREAKDOWN';
 
+export interface IMachineCustomTest {
+  testName: string;
+  testType?: string;
+  unit?: string;
+  standardSpecification?: string;
+  minValue?: number;
+  maxValue?: number;
+  isMandatory?: boolean;
+}
+
 export interface IMachine extends Document {
   code: string;
   name: string;
@@ -13,6 +23,7 @@ export interface IMachine extends Document {
   speedMetersPerMinute?: number;
   location?: string;
   specifications?: Record<string, unknown>;
+  customTests?: IMachineCustomTest[];
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -67,6 +78,17 @@ const machineSchema = new Schema<IMachine>(
       type: Schema.Types.Mixed,
       default: {},
     },
+    customTests: [
+      {
+        testName: { type: String, required: true, trim: true },
+        testType: { type: String, trim: true },
+        unit: { type: String, trim: true },
+        standardSpecification: { type: String, trim: true },
+        minValue: { type: Number },
+        maxValue: { type: Number },
+        isMandatory: { type: Boolean, default: false },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,

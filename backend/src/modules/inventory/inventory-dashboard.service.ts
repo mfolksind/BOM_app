@@ -132,6 +132,21 @@ export class InventoryDashboardService {
 
     return {
       stock: currentBalances,
+      summary: currentBalances,
+      ownerTypeBreakdown: [
+        {
+          _id: 'FACTORY',
+          totalOnHand: currentBalances.factoryOnHand,
+          totalReserved: currentBalances.factoryReserved,
+          totalAvailable: currentBalances.factoryAvailable,
+        },
+        {
+          _id: 'CUSTOMER',
+          totalOnHand: currentBalances.customerOnHand,
+          totalReserved: currentBalances.customerReserved,
+          totalAvailable: currentBalances.customerAvailable,
+        },
+      ],
       periodMovements: movementSummary,
       lowStockCount: lowStockAlerts.length,
       period: {

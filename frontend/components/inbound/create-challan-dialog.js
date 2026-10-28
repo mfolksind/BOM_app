@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { toast } from "sonner";
-import { Plus, Trash2, Truck } from "lucide-react";
+import { Plus, Trash2, Truck, Package } from "lucide-react";
 import { api } from "@/lib/api";
 
 export function CreateInboundChallanDialog({ open, onOpenChange, customers = [], warehouses = [], materials = [], onSuccess }) {
@@ -81,6 +81,18 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
         ],
     });
 
+    const [includeDrums, setIncludeDrums] = useState(false);
+    const [drumData, setDrumData] = useState({
+        quantity: "5",
+        drumSize: "44X16X24",
+        drumType: "WOODEN",
+        refRgpNumber: "",
+        prefix: "MF/",
+        startingNumber: "1",
+        tareWeightKg: "85",
+        remarks: "STD.LENGTH",
+    });
+
     const handleAddLine = () => {
         setFormData((prev) => ({
             ...prev,
@@ -138,12 +150,14 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
             return;
         }
 
-        for (let i = 0; i < formData.lines.length; i++) {
-            const line = formData.lines[i];
-            if (!line.materialId) {
-                toast.error(`Please select raw material on line #${i + 1}`);
-                return;
-            }
+        const validLines = formData.lines.filter((l) => l.materialId);
+        if (validLines.length === 0 && (!includeDrums || parseInt(drumData.quantity) <= 0)) {
+            toast.error("Please add at least one raw material line item or returnable drum entry");
+            return;
+        }
+
+        for (let i = 0; i < validLines.length; i++) {
+            const line = validLines[i];
             const declQty = parseFloat(line.declaredQuantity);
             if (isNaN(declQty) || declQty <= 0) {
                 toast.error(`Declared quantity must be greater than 0 on line #${i + 1}`);
@@ -170,7 +184,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                 transporterName: formData.transporterName.trim() || undefined,
                 lrNumber: formData.lrNumber.trim() || undefined,
                 remarks: formData.remarks.trim() || undefined,
-                lines: formData.lines.map((l) => ({
+                lines: validLines.map((l) => ({
                     materialId: l.materialId,
                     declaredQuantity: parseFloat(l.declaredQuantity),
                     receivedQuantity: l.receivedQuantity ? parseFloat(l.receivedQuantity) : parseFloat(l.declaredQuantity),
@@ -179,6 +193,18 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                     remarks: l.remarks.trim() || undefined,
                 })),
             };
+
+            if (includeDrums && parseInt(drumData.quantity) > 0) {
+                payload.drums = {
+                    quantity: parseInt(drumData.quantity),
+                    drumSize: drumData.drumSize.trim() || "44X16X24",
+                    drumType: drumData.drumType,
+                    refRgpNumber: drumData.refRgpNumber.trim() || formData.customerChallanNumber.trim(),
+                    prefix: drumData.prefix.trim() || "MF/",
+                    tareWeightKg: parseFloat(drumData.tareWeightKg) || 85,
+                    remarks: drumData.remarks.trim() || "STD.LENGTH",
+                };
+            }
 
             const res = await api.post("/inbound-challans", payload);
             if (res?.success || res?.data) {
@@ -359,6 +385,116 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                                     className="text-sm resize-none"
                                 />
                             </div>
+                        </div>
+
+                        {/* Customer Returnable Drums Receipt Section */}
+                        <div className="p-4 bg-orange-50/50 rounded-xl border border-orange-200/90 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5">
+                                    <span className="p-2 bg-orange-100 text-orange-700 rounded-lg shrink-0">
+                                        <Package className="w-4 h-4" />
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                                            Customer Returnable Empty Drums Received
+                                        </h4>
+                                        <p className="text-[11px] text-slate-500">
+                                            Did the customer send empty drums on this delivery challan? (e.g. 5 drums for cable winding)
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant={includeDrums ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => setIncludeDrums(!includeDrums)}
+                                    className={`h-8 text-xs font-semibold cursor-pointer shrink-0 ${
+                                        includeDrums
+                                            ? "bg-orange-600 hover:bg-orange-700 text-white"
+                                            : "border-orange-300 text-orange-700 hover:bg-orange-100"
+                                    }`}
+                                >
+                                    {includeDrums ? "✓ Drums Added (Click to remove)" : "+ Add Returnable Drums"}
+                                </Button>
+                            </div>
+
+                            {includeDrums && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-orange-200/70">
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Drum Quantity *</Label>
+                                        <Input
+                                            type="number"
+                                            min="1"
+                                            value={drumData.quantity}
+                                            onChange={(e) => setDrumData({ ...drumData, quantity: e.target.value })}
+                                            className="h-8 text-xs bg-white font-mono font-bold"
+                                            placeholder="5"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Drum Size *</Label>
+                                        <Input
+                                            value={drumData.drumSize}
+                                            onChange={(e) => setDrumData({ ...drumData, drumSize: e.target.value })}
+                                            className="h-8 text-xs bg-white font-mono"
+                                            placeholder="44X16X24"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Ref RGP / Challan No</Label>
+                                        <Input
+                                            value={drumData.refRgpNumber}
+                                            onChange={(e) => setDrumData({ ...drumData, refRgpNumber: e.target.value })}
+                                            className="h-8 text-xs bg-white font-mono text-indigo-700 font-semibold"
+                                            placeholder={formData.customerChallanNumber || "262740872"}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Drum Prefix</Label>
+                                        <Input
+                                            value={drumData.prefix}
+                                            onChange={(e) => setDrumData({ ...drumData, prefix: e.target.value })}
+                                            className="h-8 text-xs bg-white font-mono"
+                                            placeholder="MF/"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Drum Type</Label>
+                                        <Select
+                                            value={drumData.drumType}
+                                            onValueChange={(val) => setDrumData({ ...drumData, drumType: val })}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs bg-white">
+                                                <SelectValue placeholder="Type" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="WOODEN" className="text-xs">WOODEN</SelectItem>
+                                                <SelectItem value="STEEL" className="text-xs">STEEL</SelectItem>
+                                                <SelectItem value="PLASTIC" className="text-xs">PLASTIC</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Tare Weight (kg)</Label>
+                                        <Input
+                                            type="number"
+                                            value={drumData.tareWeightKg}
+                                            onChange={(e) => setDrumData({ ...drumData, tareWeightKg: e.target.value })}
+                                            className="h-8 text-xs bg-white font-mono"
+                                            placeholder="85"
+                                        />
+                                    </div>
+                                    <div className="space-y-1 col-span-2">
+                                        <Label className="text-[11px] font-semibold text-slate-700">Remarks</Label>
+                                        <Input
+                                            value={drumData.remarks}
+                                            onChange={(e) => setDrumData({ ...drumData, remarks: e.target.value })}
+                                            className="h-8 text-xs bg-white"
+                                            placeholder="STD.LENGTH"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Raw Material Lines */}

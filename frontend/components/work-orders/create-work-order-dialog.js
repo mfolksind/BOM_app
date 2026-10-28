@@ -21,6 +21,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { toast } from 'sonner';
 import { FileSpreadsheet, Calendar, DollarSign, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -37,6 +46,8 @@ export function CreateWorkOrderDialog({
   const [localProducts, setLocalProducts] = useState(products);
   const [boms, setBoms] = useState([]);
   const [loadingBoms, setLoadingBoms] = useState(false);
+  const [previewAvailability, setPreviewAvailability] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   useEffect(() => {
     if (customers?.length > 0) setLocalCustomers(customers);
@@ -141,6 +152,32 @@ export function CreateWorkOrderDialog({
       setLoadingBoms(false);
     }
   };
+
+  useEffect(() => {
+    const length = parseFloat(formData.orderedLengthMeters);
+    if (formData.bomVersionId && !isNaN(length) && length > 0) {
+      setLoadingPreview(true);
+      api.post('/work-orders/preview/material-availability', {
+        bomVersionId: formData.bomVersionId,
+        orderedLengthMeters: length,
+        customerId: formData.customerId || undefined,
+      })
+        .then((res) => {
+          if (res?.data?.materials) {
+            setPreviewAvailability(res.data.materials);
+          } else {
+            setPreviewAvailability(null);
+          }
+        })
+        .catch((e) => {
+          console.error('Failed to preview material availability', e);
+          setPreviewAvailability(null);
+        })
+        .finally(() => setLoadingPreview(false));
+    } else {
+      setPreviewAvailability(null);
+    }
+  }, [formData.bomVersionId, formData.orderedLengthMeters, formData.customerId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -335,6 +372,68 @@ export function CreateWorkOrderDialog({
                 />
               </div>
             </div>
+
+            {loadingPreview && (
+              <div className="text-xs text-slate-500 py-1 flex items-center gap-1.5 animate-pulse">
+                <span>Checking warehouse stock availability...</span>
+              </div>
+            )}
+            {previewAvailability && previewAvailability.length > 0 && (
+              <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">
+                    Warehouse Global Stock Availability
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Live warehouse stock vs required norm
+                  </span>
+                </div>
+                <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-xs">
+                  <Table>
+                    <TableHeader className="bg-slate-50/80">
+                      <TableRow>
+                        <TableHead className="text-xs font-semibold text-slate-700 py-1.5">Material</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-1.5">Required</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-1.5">Available (Global)</TableHead>
+                        <TableHead className="text-center text-xs font-semibold text-slate-700 py-1.5">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewAvailability.map((m, idx) => {
+                        const isShort = m.shortage > 0;
+                        return (
+                          <TableRow key={idx} className="hover:bg-slate-50/50">
+                            <TableCell className="py-1.5">
+                              <div className="font-semibold text-slate-900 text-xs">{m.materialName}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">{m.materialCode}</div>
+                            </TableCell>
+                            <TableCell className="text-right text-xs text-slate-700 font-medium py-1.5">
+                              {m.requiredQuantity?.toFixed(2)} {m.unit}
+                            </TableCell>
+                            <TableCell className="text-right text-xs font-medium py-1.5">
+                              <span className="text-slate-800 font-semibold">{m.availableStock?.toFixed(2)} {m.unit}</span>
+                              {m.customerAvailableQuantity > 0 && (
+                                <span className="block text-[10px] text-slate-400 font-normal">
+                                  Customer: {m.customerAvailableQuantity.toFixed(2)} {m.unit}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center py-1.5">
+                              <Badge
+                                variant="outline"
+                                className={isShort ? 'border-rose-200 text-rose-700 bg-rose-50 text-[10px]' : 'border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]'}
+                              >
+                                {isShort ? `Short (-${m.shortage.toFixed(1)})` : 'Available'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">

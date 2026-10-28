@@ -130,6 +130,7 @@ describe('Customer Drum Receiving, Packing List (Image Match), and Challan Gener
       workOrderId: workOrder._id,
       processStageId: stage._id,
       plannedQuantity: 2000,
+      machineCode: 'MCH-01',
       unit: 'METER',
       status: 'COMPLETED',
     });

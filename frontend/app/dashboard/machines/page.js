@@ -352,7 +352,14 @@ export default function MachinesPage() {
 
                       <TableCell className="py-3.5">
                         <div className="font-semibold text-slate-900 text-sm">{m.name}</div>
-                        <p className="text-xs text-slate-400">{m.machineType || 'General Line Machinery'}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-xs text-slate-400">{m.machineType || 'General Line Machinery'}</p>
+                          {m.customTests && m.customTests.length > 0 && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+                              {m.customTests.length} QA Tests
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
 
                       <TableCell className="py-3.5">

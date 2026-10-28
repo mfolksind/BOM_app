@@ -3,6 +3,16 @@ import { z } from 'zod';
 const objectIdRegex = /^[0-9a-fA-F]{24}$/;
 const objectIdSchema = z.string().regex(objectIdRegex, 'Invalid ObjectId');
 
+const customTestSchema = z.object({
+  testName: z.string().trim().min(1, 'Test name is required'),
+  testType: z.string().trim().optional(),
+  unit: z.string().trim().optional(),
+  standardSpecification: z.string().trim().optional(),
+  minValue: z.coerce.number().optional(),
+  maxValue: z.coerce.number().optional(),
+  isMandatory: z.boolean().default(false),
+});
+
 export const createMachineSchema = {
   body: z.object({
     code: z
@@ -19,6 +29,7 @@ export const createMachineSchema = {
     speedMetersPerMinute: z.coerce.number().min(0).optional(),
     location: z.string().trim().optional(),
     specifications: z.record(z.unknown()).optional().default({}),
+    customTests: z.array(customTestSchema).optional().default([]),
     isActive: z.boolean().default(true),
   }),
 };
@@ -36,6 +47,7 @@ export const updateMachineSchema = {
     speedMetersPerMinute: z.coerce.number().min(0).optional(),
     location: z.string().trim().optional(),
     specifications: z.record(z.unknown()).optional(),
+    customTests: z.array(customTestSchema).optional(),
     isActive: z.boolean().optional(),
   }),
 };
