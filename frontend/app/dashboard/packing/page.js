@@ -504,14 +504,36 @@ export default function PackingPage() {
                       <TableCell className="py-2.5 font-mono text-xs text-slate-600">
                         {drum.inboundChallanNumber || '—'}
                       </TableCell>
-                      <TableCell className="py-2.5 text-xs text-slate-700">
-                        {drum.ownership === 'CUSTOMER' ? (
-                          <span className="font-semibold text-indigo-700">
-                            {drum.customerId?.name || 'Customer'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">Factory</span>
-                        )}
+                      <TableCell className="py-2.5 text-xs">
+                        {(() => {
+                          const isCust =
+                            drum.ownership === 'CUSTOMER' ||
+                            drum.ownership === 'CUSTOMER_SUPPLIED' ||
+                            Boolean(drum.customerId);
+                          const customerObj =
+                            (drum.customerId && typeof drum.customerId === 'object' ? drum.customerId : null) ||
+                            customers.find((c) => c._id === drum.customerId || c._id === drum.customerId?._id);
+                          const customerName =
+                            customerObj?.name ||
+                            customerObj?.legalName ||
+                            (drum.inboundChallanId?.customerId?.name) ||
+                            (isCust ? 'Customer Supplied' : 'Factory Owned');
+
+                          return isCust ? (
+                            <div>
+                              <span className="font-semibold text-indigo-700 block">
+                                {customerName}
+                              </span>
+                              {customerObj?.code && (
+                                <span className="font-mono text-[10px] text-slate-400">
+                                  {customerObj.code}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-600 font-medium">Factory Owned</span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="py-2.5 text-xs text-slate-600 uppercase">
                         {drum.drumType || 'WOODEN'}

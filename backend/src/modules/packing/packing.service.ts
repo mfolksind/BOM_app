@@ -33,7 +33,12 @@ export interface ReceiveCustomerDrumsDto {
   transporter?: string;
   lrNumber?: string;
   remarks?: string;
-  drums: ReceiveCustomerDrumItemDto[];
+  quantity?: number;
+  drumSize?: string;
+  drumType?: DrumType;
+  tareWeightKg?: number;
+  prefix?: string;
+  drums?: ReceiveCustomerDrumItemDto[];
 }
 
 export interface CreateDrumDto {
@@ -188,14 +193,25 @@ export class PackingService {
 
     const createdDrums: IDrum[] = [];
 
-    for (let i = 0; i < dto.drums.length; i++) {
-      const d = dto.drums[i];
-      const drumNumber =
+    const drumItems: ReceiveCustomerDrumItemDto[] =
+      dto.drums && dto.drums.length > 0
+        ? dto.drums
+        : Array.from({ length: dto.quantity || 1 }, (_, i) => ({
+            drumNumber: `${dto.prefix || 'MF/'}${String(i + 1).padStart(2, '0')}`,
+            drumSize: dto.drumSize || '44X16X24',
+            drumType: (dto.drumType as DrumType) || 'WOODEN',
+            tareWeightKg: dto.tareWeightKg ?? 150,
+            remarks: 'STD.LENGTH',
+          }));
+
+    for (let i = 0; i < drumItems.length; i++) {
+      const d = drumItems[i];
+      let drumNumber =
         d.drumNumber || (await InventorySequenceUtil.getNextSequence('DRUM', 'DRM'));
 
       const existing = await DrumModel.findOne({ drumNumber });
       if (existing) {
-        throw new ConflictError(`Drum with number '${drumNumber}' already exists`);
+        drumNumber = `${dto.prefix || 'MF/'}${Date.now().toString().slice(-4)}-${String(i + 1).padStart(2, '0')}`;
       }
 
       const tareWeightKg = d.tareWeightKg ?? 150;
@@ -367,6 +383,7 @@ export class PackingService {
     limit: number;
     status?: DrumStatus;
     drumType?: DrumType;
+    ownership?: string;
     currentProductId?: string;
     workOrderId?: string;
     customerId?: string;
@@ -377,6 +394,15 @@ export class PackingService {
 
     if (filter.status) query.status = filter.status;
     if (filter.drumType) query.drumType = filter.drumType;
+    if (filter.ownership && filter.ownership !== 'ALL') {
+      if (filter.ownership === 'CUSTOMER' || filter.ownership === 'CUSTOMER_SUPPLIED') {
+        query.ownership = { $in: ['CUSTOMER', 'CUSTOMER_SUPPLIED'] };
+      } else if (filter.ownership === 'FACTORY' || filter.ownership === 'FACTORY_OWNED') {
+        query.ownership = { $in: ['FACTORY', 'FACTORY_OWNED'] };
+      } else {
+        query.ownership = filter.ownership;
+      }
+    }
     if (filter.currentProductId)
       query.currentProductId = new mongoose.Types.ObjectId(filter.currentProductId);
     if (filter.workOrderId) query.workOrderId = new mongoose.Types.ObjectId(filter.workOrderId);
@@ -386,14 +412,20 @@ export class PackingService {
 
     if (filter.search) {
       const searchRegex = new RegExp(filter.search, 'i');
-      query.$or = [{ drumNumber: searchRegex }, { serialNumber: searchRegex }];
+      query.$or = [
+        { drumNumber: searchRegex },
+        { serialNumber: searchRegex },
+        { refRgpNumber: searchRegex },
+        { inboundChallanNumber: searchRegex },
+      ];
     }
 
     const skip = (filter.page - 1) * filter.limit;
     const [drums, total] = await Promise.all([
       DrumModel.find(query)
         .populate('currentProductId', 'code name')
-        .populate('customerId', 'code name')
+        .populate('customerId', 'code name legalName gstin')
+        .populate('inboundChallanId', 'challanNumber customerChallanNumber customerId')
         .populate('currentWarehouseId', 'code name')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -561,18 +593,32 @@ export class PackingService {
       totalGoodOutputMeters > 0 ? totalGoodOutputMeters : (workOrder.orderedLengthMeters || 1000000);
     const availableToPackMeters = Math.max(0, maxAllowedMeters - alreadyPackedMeters);
 
+    // Ensure drumId is resolved for all lines, even if manually typed
+    for (const l of dto.lines) {
+      if (!l.drumId && l.drumNumber) {
+        let d = await DrumModel.findOne({ drumNumber: l.drumNumber });
+        if (!d) {
+          d = await DrumModel.create({
+            drumNumber: l.drumNumber,
+            drumType: l.drumType || 'WOODEN',
+            drumSize: l.drumSize || '44X16X24',
+            refRgpNumber: l.refRgpNumber || l.refRgpNo,
+            customerId: customer._id,
+            ownership: 'CUSTOMER_SUPPLIED',
+            status: 'AVAILABLE',
+            tareWeightKg: l.tareWeightKg ?? 150,
+          });
+        }
+        l.drumId = d._id.toString();
+      }
+    }
+
     // Validate drum lines
-    const drumIds = dto.lines.map((l) => l.drumId);
-    const uniqueDrumIds = new Set(drumIds);
-    if (uniqueDrumIds.size !== drumIds.length) {
-      throw new BadRequestError('Duplicate drums found in packing list items');
+    const drumIds = dto.lines.map((l) => l.drumId).filter(Boolean);
+    if (new Set(drumIds).size !== drumIds.length) {
+      throw new BadRequestError('Duplicate drums are not allowed in the same packing list');
     }
-
     const drums = await DrumModel.find({ _id: { $in: drumIds } });
-    if (drums.length !== drumIds.length) {
-      throw new NotFoundError('One or more specified drums were not found');
-    }
-
     const drumMap = new Map(drums.map((d) => [d._id.toString(), d]));
 
     let calculatedLength = 0;
@@ -598,7 +644,10 @@ export class PackingService {
 
     for (let i = 0; i < dto.lines.length; i++) {
       const lineDto = dto.lines[i];
-      const drum = drumMap.get(lineDto.drumId);
+      let drum = drumMap.get(lineDto.drumId);
+      if (!drum && lineDto.drumNumber) {
+        drum = await DrumModel.findOne({ drumNumber: lineDto.drumNumber });
+      }
       if (!drum) continue;
 
       if (drum.status === 'PACKED' || drum.status === 'DISPATCHED') {
@@ -620,7 +669,15 @@ export class PackingService {
 
       const lengthBottom = lineDto.lengthBottom ?? 0;
       const lengthTop = lineDto.lengthTop ?? (lineDto.lengthMeters ?? drum.cableLengthMeters);
-      const lengthTotal = lineDto.lengthTotal || (lengthBottom + lengthTop);
+      // Formula: Length Top - Length Bottom (as requested by user)
+      let lengthTotal = lineDto.lengthTotal;
+      if (lengthTotal === undefined || lengthTotal === null) {
+        if (lineDto.lengthTop !== undefined && lineDto.lengthTop !== null) {
+          lengthTotal = Math.max(0, Number((Number(lineDto.lengthTop) - lengthBottom).toFixed(2)));
+        } else {
+          lengthTotal = lineDto.lengthMeters ?? drum.cableLengthMeters;
+        }
+      }
       const lengthMeters = lengthTotal > 0 ? lengthTotal : (lineDto.lengthMeters ?? drum.cableLengthMeters);
 
       if (lengthMeters <= 0) {

@@ -8,6 +8,7 @@ import { InventoryBalanceModel } from '../inventory/inventory-balance.model';
 import { OutboundChallanModel } from '../dispatch/outbound-challan.model';
 import { DispatchModel } from '../dispatch/dispatch.model';
 import { DrumModel } from '../packing/drum.model';
+import { ScrapRecordModel } from '../production/scrap-record.model';
 import { AuditLogModel } from '../shared/audit-log.model';
 import {
   CreateCustomerInput,
@@ -305,7 +306,34 @@ export class CustomersService {
       .sort({ challanDate: -1, createdAt: -1 })
       .limit(50);
 
-    // 5. Total Material Stock KG & Value
+    // 5. Customer Scrap & Process Waste Records
+    const scrapRecords = await ScrapRecordModel.find({ customerId: objectId })
+      .populate('materialId', 'code name baseUnit category')
+      .populate('workOrderId', 'workOrderNumber')
+      .populate('scrapWarehouseId', 'code name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const totalScrapKg = scrapRecords.reduce((acc, curr) => acc + (curr.scrapQuantity || 0), 0);
+    const scrapByMaterialMap = new Map<string, { materialName: string; materialCode: string; totalKg: number; unit: string }>();
+    for (const s of scrapRecords) {
+      const mat = s.materialId as any;
+      const key = mat?._id?.toString() || 'unknown';
+      const existing = scrapByMaterialMap.get(key) || {
+        materialName: mat?.name || 'Unknown Material',
+        materialCode: mat?.code || '-',
+        totalKg: 0,
+        unit: s.unit || 'KG',
+      };
+      existing.totalKg += s.scrapQuantity || 0;
+      scrapByMaterialMap.set(key, existing);
+    }
+    const scrapMaterialBreakdown = Array.from(scrapByMaterialMap.values()).map((v) => ({
+      ...v,
+      totalKg: Number(v.totalKg.toFixed(2)),
+    }));
+
+    // 6. Total Material Stock KG & Value
     const totalStockKg = rawMaterialStock.reduce((acc, curr) => acc + (curr.quantityOnHand || 0), 0);
     const totalAvailableKg = rawMaterialStock.reduce(
       (acc, curr) => acc + (curr.quantityAvailable || 0),
@@ -337,11 +365,18 @@ export class CustomersService {
         drumSummary,
         inboundChallanCount: inboundChallans.length,
         outboundChallanCount: outboundChallans.length,
+        totalScrapKg: Number(totalScrapKg.toFixed(2)),
+        scrapRecordsCount: scrapRecords.length,
       },
       rawMaterialStock,
       drums,
       inboundChallans,
       outboundChallans,
+      scrapSummary: {
+        totalScrapKg: Number(totalScrapKg.toFixed(2)),
+        materialBreakdown: scrapMaterialBreakdown,
+      },
+      scrapRecords,
     };
   }
 }

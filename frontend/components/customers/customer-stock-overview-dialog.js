@@ -5,12 +5,12 @@ import { apiClient } from '@/lib/api';
 import { toast } from 'sonner';
 
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -40,6 +40,7 @@ import {
   MapPin,
   Phone,
   FileCheck2,
+  Scale,
 } from 'lucide-react';
 
 export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
@@ -81,58 +82,68 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-6 bg-slate-50">
-          <DialogHeader className="border-b border-slate-200 pb-4 bg-white -mx-6 -mt-6 p-6 sticky top-0 z-20 shadow-xs">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2.5">
-                  <span className="p-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200">
-                    <Building2 className="w-5 h-5" />
-                  </span>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-4xl md:max-w-5xl lg:w-[75vw] lg:max-w-[1240px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+        >
+          <div className="flex flex-col h-full overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-200 bg-white sticky top-0 z-20 shadow-xs shrink-0">
+              <SheetHeader className="p-0">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                      {customer.name}
-                      <span className="text-xs font-mono font-normal bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">
-                        {customer.code}
+                    <div className="flex items-center gap-2.5">
+                      <span className="p-2 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200">
+                        <Building2 className="w-5 h-5" />
                       </span>
-                    </DialogTitle>
-                    <DialogDescription className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-3">
-                      <span>GSTIN: <strong className="font-mono text-slate-700">{customer.gstin || 'N/A'}</strong></span>
-                      {customer.phone && (
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3 text-slate-400" />
-                          {customer.phone}
-                        </span>
-                      )}
-                      {customer.billingAddress?.city && (
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-slate-400" />
-                          {customer.billingAddress.city}, {customer.billingAddress.state}
-                        </span>
-                      )}
-                    </DialogDescription>
+                      <div>
+                        <SheetTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                          {customer.name}
+                          <span className="text-xs font-mono font-normal bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">
+                            {customer.code}
+                          </span>
+                        </SheetTitle>
+                        <SheetDescription className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-3">
+                          <span>GSTIN: <strong className="font-mono text-slate-700">{customer.gstin || 'N/A'}</strong></span>
+                          {customer.phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-slate-400" />
+                              {customer.phone}
+                            </span>
+                          )}
+                          {customer.billingAddress?.city && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-slate-400" />
+                              {customer.billingAddress.city}, {customer.billingAddress.state}
+                            </span>
+                          )}
+                        </SheetDescription>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={fetchOverview}
+                      disabled={isLoading}
+                      className="h-8.5 gap-1.5 text-xs text-slate-700 bg-white cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchOverview}
-                  disabled={isLoading}
-                  className="h-8.5 gap-1.5 text-xs text-slate-700 bg-white"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
-              </div>
+              </SheetHeader>
             </div>
-          </DialogHeader>
+
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
 
           {/* KPI Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4">
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
                 Total RM Stock
@@ -166,22 +177,33 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
               <span className="text-[10px] text-amber-600 mt-1 block">Locked in WIP</span>
             </div>
 
+            <div className="bg-white p-3.5 rounded-xl border border-rose-200 bg-rose-50/20 shadow-xs">
+              <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block mb-1">
+                Process Scrap
+              </span>
+              <div className="text-xl font-bold text-rose-700 font-mono">
+                {summary.totalScrapKg ? summary.totalScrapKg.toLocaleString('en-IN') : '0.00'}
+                <span className="text-xs font-normal text-rose-600 ml-1">kg</span>
+              </div>
+              <span className="text-[10px] text-rose-600 mt-1 block">Party Process Loss</span>
+            </div>
+
             <div className="bg-white p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-xs">
               <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block mb-1">
-                Empty Drums in Yard
+                Empty Drums
               </span>
               <div className="text-xl font-bold text-indigo-700 font-mono">
                 {drumSummary.availableEmpty || 0}
                 <span className="text-xs font-normal text-slate-500 ml-1">
-                  / {drumSummary.totalReceived || 0} total
+                  / {drumSummary.totalReceived || 0}
                 </span>
               </div>
-              <span className="text-[10px] text-indigo-600 mt-1 block">Available for packaging</span>
+              <span className="text-[10px] text-indigo-600 mt-1 block">In plant yard</span>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-purple-200 bg-purple-50/20 shadow-xs">
               <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider block mb-1">
-                Packed / In Use
+                Packed Drums
               </span>
               <div className="text-xl font-bold text-purple-700 font-mono">
                 {drumSummary.packed || 0}
@@ -243,6 +265,19 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
             >
               <FileCheck2 className="w-3.5 h-3.5" />
               Outbound Challans & Consumption ({data?.outboundChallans?.length || 0})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('scrap')}
+              className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+                activeTab === 'scrap'
+                  ? 'border-rose-600 text-rose-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Scale className="w-3.5 h-3.5" />
+              Process Loss & Scrap ({data?.scrapRecords?.length || 0})
             </button>
           </div>
 
@@ -565,8 +600,172 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
               </Table>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+
+          {/* Tab 5: Process Loss & Scrap */}
+          {activeTab === 'scrap' && (
+            <div className="bg-white rounded-b-xl border border-slate-200 border-t-0 p-5 space-y-6">
+              {/* Scrap Summary Banner */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-rose-50/50 rounded-xl border border-rose-200/80">
+                <div>
+                  <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
+                    Total Party Scrap / Waste
+                  </span>
+                  <div className="text-xl font-bold font-mono text-rose-900 mt-1">
+                    {data?.scrapSummary?.totalScrapKg || summary.totalScrapKg || 0} kg
+                  </div>
+                  <span className="text-[10px] text-rose-700/80 mt-0.5 block">
+                    Accumulated across all Work Orders
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
+                    Material Categories
+                  </span>
+                  <div className="text-xl font-bold font-mono text-rose-900 mt-1">
+                    {data?.scrapSummary?.materialBreakdown?.length || 0} materials
+                  </div>
+                  <span className="text-[10px] text-rose-700/80 mt-0.5 block">
+                    Copper, Aluminum, PVC, XLPE, GI Wire
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
+                    Scrap Storage
+                  </span>
+                  <div className="text-sm font-semibold text-rose-900 mt-1 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    Isolated in Customer Scrap Yard
+                  </div>
+                  <span className="text-[10px] text-rose-700/80 mt-0.5 block">
+                    Saleable / returnable on outward gate pass
+                  </span>
+                </div>
+              </div>
+
+              {/* Material Breakdown Table */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <Scale className="w-4 h-4 text-rose-600" />
+                  Scrap Breakdown by Material
+                </h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                  <Table>
+                    <TableHeader className="bg-slate-50/80">
+                      <TableRow>
+                        <TableHead className="text-xs font-semibold">Material Code & Name</TableHead>
+                        <TableHead className="text-xs font-semibold text-right">Total Scrapped</TableHead>
+                        <TableHead className="text-xs font-semibold text-right">Unit</TableHead>
+                        <TableHead className="text-xs font-semibold text-center">Party Accounting</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {!data?.scrapSummary?.materialBreakdown || data.scrapSummary.materialBreakdown.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-xs text-slate-400 py-6">
+                            No scrap records posted yet for this customer.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        data.scrapSummary.materialBreakdown.map((m, idx) => (
+                          <TableRow key={idx} className="hover:bg-slate-50/60">
+                            <TableCell>
+                              <div className="font-semibold text-xs text-slate-900">{m.materialName}</div>
+                              <div className="text-[11px] text-slate-400 font-mono">{m.materialCode}</div>
+                            </TableCell>
+                            <TableCell className="text-right font-mono font-bold text-xs text-rose-700">
+                              {m.totalKg?.toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right text-xs font-medium text-slate-600">
+                              {m.unit}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className="text-[10px] bg-slate-50 text-slate-700 border-slate-200">
+                                Customer Stock Free / Scrap
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {/* Historical Scrap Transactions */}
+              {data?.scrapRecords && data.scrapRecords.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-slate-600" />
+                    All Scrap Transactions ({data.scrapRecords.length})
+                  </h4>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                    <Table>
+                      <TableHeader className="bg-slate-50/80">
+                        <TableRow>
+                          <TableHead className="text-xs font-semibold">Scrap #</TableHead>
+                          <TableHead className="text-xs font-semibold">Work Order #</TableHead>
+                          <TableHead className="text-xs font-semibold">Material</TableHead>
+                          <TableHead className="text-xs font-semibold text-right">Quantity</TableHead>
+                          <TableHead className="text-xs font-semibold">Type / Stage</TableHead>
+                          <TableHead className="text-xs font-semibold">Warehouse</TableHead>
+                          <TableHead className="text-xs font-semibold">Date</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.scrapRecords.map((s) => (
+                          <TableRow key={s._id} className="hover:bg-slate-50/60">
+                            <TableCell className="font-mono text-xs font-semibold text-slate-800">
+                              {s.scrapNumber}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-indigo-700 font-medium">
+                              {s.workOrderId?.workOrderNumber || '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-800">
+                              {s.materialId?.name || 'Material'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs font-bold text-rose-700">
+                              {s.scrapQuantity} {s.unit}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-600">
+                              <span className="capitalize">{s.scrapType?.replace(/_/g, ' ').toLowerCase()}</span>
+                              {s.scrapCategory && (
+                                <span className="block text-[10px] text-slate-400">{s.scrapCategory}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-600">
+                              {s.scrapWarehouseId?.name || 'Scrap Yard'}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-400 font-mono">
+                              {s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Sticky Footer */}
+        <div className="px-6 py-3.5 bg-white border-t border-slate-200 flex items-center justify-end shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="text-xs border-slate-200 cursor-pointer"
+          >
+            Close Overview
+          </Button>
+        </div>
+      </div>
+    </SheetContent>
+  </Sheet>
 
       {/* Nested Packing List Dialog (Image 1) */}
       {selectedPackingListId && (

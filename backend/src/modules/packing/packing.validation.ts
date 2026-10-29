@@ -44,6 +44,11 @@ export const receiveCustomerDrumsSchema = {
     transporter: z.string().trim().optional(),
     lrNumber: z.string().trim().optional(),
     remarks: z.string().trim().optional(),
+    quantity: z.coerce.number().int().positive().optional(),
+    drumSize: z.string().trim().optional(),
+    drumType: z.string().trim().optional(),
+    tareWeightKg: z.coerce.number().positive().optional(),
+    prefix: z.string().trim().optional(),
     drums: z
       .array(
         z.object({
@@ -55,7 +60,7 @@ export const receiveCustomerDrumsSchema = {
           remarks: z.string().trim().optional(),
         }),
       )
-      .min(1, 'At least one drum is required'),
+      .optional(),
   }),
 };
 
@@ -92,6 +97,7 @@ export const listDrumsQuerySchema = {
     limit: z.coerce.number().int().positive().max(100).default(20),
     status: z.string().trim().optional(),
     drumType: z.string().trim().optional(),
+    ownership: z.string().trim().optional(),
     currentProductId: objectIdSchema.optional(),
     workOrderId: objectIdSchema.optional(),
     customerId: objectIdSchema.optional(),

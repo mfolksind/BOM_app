@@ -12,6 +12,7 @@ import {
   cancelWorkOrderSchema,
   holdWorkOrderSchema,
   completeWorkOrderSchema,
+  recordWorkOrderScrapSchema,
 } from './work-orders.validation';
 
 const router = Router();
@@ -129,6 +130,18 @@ router.get(
   '/:id/dispatch-summary',
   validateRequest(workOrderIdParamSchema),
   dispatchController.getWorkOrderDispatchSummary.bind(dispatchController),
+);
+
+router.get(
+  '/:id/scrap',
+  validateRequest(workOrderIdParamSchema),
+  workOrdersController.getWorkOrderScrap.bind(workOrdersController),
+);
+
+router.post(
+  '/:id/scrap',
+  validateRequest(recordWorkOrderScrapSchema),
+  workOrdersController.recordWorkOrderScrap.bind(workOrdersController),
 );
 
 export const workOrderRoutes = router;

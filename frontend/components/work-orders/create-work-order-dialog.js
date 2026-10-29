@@ -48,6 +48,7 @@ export function CreateWorkOrderDialog({
   const [loadingBoms, setLoadingBoms] = useState(false);
   const [previewAvailability, setPreviewAvailability] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [freezeStock, setFreezeStock] = useState(true);
 
   useEffect(() => {
     if (customers?.length > 0) setLocalCustomers(customers);
@@ -216,11 +217,16 @@ export function CreateWorkOrderDialog({
         priority: formData.priority,
         notes: formData.notes.trim() || undefined,
         customerSpecifications: formData.customerSpecifications.trim() || undefined,
+        confirmAndReserve: freezeStock,
       };
 
       const res = await api.post('/work-orders', payload);
       if (res?.success || res?.data) {
-        toast.success('Work Order created successfully in DRAFT state');
+        toast.success(
+          freezeStock
+            ? 'Work Order created & customer stock reserved/frozen successfully'
+            : 'Work Order created successfully in DRAFT state',
+        );
         if (onSuccess) onSuccess(res?.data);
         onOpenChange(false);
         setFormData({
@@ -271,7 +277,7 @@ export function CreateWorkOrderDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl md:max-w-2xl lg:w-[48vw] lg:max-w-[840px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+        className="w-full sm:max-w-2xl md:max-w-3xl lg:w-[56vw] lg:max-w-[960px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
       >
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
           <SheetHeader className="p-0">
@@ -378,53 +384,104 @@ export function CreateWorkOrderDialog({
                 <span>Checking warehouse stock availability...</span>
               </div>
             )}
+            {/* Live Material Availability Preview Table */}
             {previewAvailability && previewAvailability.length > 0 && (
-              <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800">
-                    Warehouse Global Stock Availability
-                  </span>
+              <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">
+                      Live Material Stock & Freezing Breakdown
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-white border-slate-300 text-slate-700">
+                      Party & Global Stock
+                    </Badge>
+                  </div>
                   <span className="text-[11px] text-slate-500">
-                    Live warehouse stock vs required norm
+                    Live On-Hand vs Frozen (Reserved) vs Free Available
                   </span>
                 </div>
-                <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-xs">
-                  <Table>
+                <div className="border border-slate-200 rounded-lg overflow-x-auto bg-white shadow-xs">
+                  <Table className="min-w-[620px]">
                     <TableHeader className="bg-slate-50/80">
                       <TableRow>
-                        <TableHead className="text-xs font-semibold text-slate-700 py-1.5">Material</TableHead>
-                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-1.5">Required</TableHead>
-                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-1.5">Available (Global)</TableHead>
-                        <TableHead className="text-center text-xs font-semibold text-slate-700 py-1.5">Status</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-700 py-2">Material</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Required Norm</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Customer Stock</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Global Stock</TableHead>
+                        <TableHead className="text-center text-xs font-semibold text-slate-700 py-2">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewAvailability.map((m, idx) => {
                         const isShort = m.shortage > 0;
+                        const hasCustomer = Boolean(formData.customerId);
+                        const custAvail = m.customerAvailableQuantity || 0;
+                        const custOnHand = m.customerOnHandQuantity || 0;
+                        const custFrozen = m.customerReservedQuantity || 0;
+                        const globAvail = m.globalAvailableQuantity ?? m.availableStock ?? 0;
+                        const globOnHand = m.globalOnHandQuantity || 0;
+                        const globFrozen = m.globalReservedQuantity || 0;
+
                         return (
                           <TableRow key={idx} className="hover:bg-slate-50/50">
-                            <TableCell className="py-1.5">
+                            <TableCell className="py-2">
                               <div className="font-semibold text-slate-900 text-xs">{m.materialName}</div>
                               <div className="text-[10px] text-slate-400 font-mono">{m.materialCode}</div>
                             </TableCell>
-                            <TableCell className="text-right text-xs text-slate-700 font-medium py-1.5">
+                            <TableCell className="text-right text-xs text-slate-800 font-semibold py-2">
                               {m.requiredQuantity?.toFixed(2)} {m.unit}
                             </TableCell>
-                            <TableCell className="text-right text-xs font-medium py-1.5">
-                              <span className="text-slate-800 font-semibold">{m.availableStock?.toFixed(2)} {m.unit}</span>
-                              {m.customerAvailableQuantity > 0 && (
-                                <span className="block text-[10px] text-slate-400 font-normal">
-                                  Customer: {m.customerAvailableQuantity.toFixed(2)} {m.unit}
-                                </span>
+                            <TableCell className="text-right py-2">
+                              {hasCustomer ? (
+                                <div>
+                                  <div className={`font-bold text-xs ${custAvail >= m.requiredQuantity ? 'text-emerald-700' : custAvail > 0 ? 'text-amber-600' : 'text-slate-500'}`}>
+                                    {custAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
+                                    <span>On-Hand: <strong className="text-slate-700">{custOnHand.toFixed(1)}</strong></span>
+                                    <span>|</span>
+                                    <span>Frozen: <strong className={custFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{custFrozen.toFixed(1)}</strong></span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-400 italic">No customer</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-center py-1.5">
-                              <Badge
-                                variant="outline"
-                                className={isShort ? 'border-rose-200 text-rose-700 bg-rose-50 text-[10px]' : 'border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]'}
-                              >
-                                {isShort ? `Short (-${m.shortage.toFixed(1)})` : 'Available'}
-                              </Badge>
+                            <TableCell className="text-right py-2">
+                              <div>
+                                <div className="font-bold text-xs text-slate-900">
+                                  {globAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
+                                  <span>On-Hand: <strong className="text-slate-700">{globOnHand.toFixed(1)}</strong></span>
+                                  <span>|</span>
+                                  <span>Frozen: <strong className={globFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{globFrozen.toFixed(1)}</strong></span>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center py-2">
+                              {custAvail >= m.requiredQuantity ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px] whitespace-nowrap"
+                                >
+                                  Party Stock OK
+                                </Badge>
+                              ) : globAvail >= m.requiredQuantity ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-blue-200 text-blue-700 bg-blue-50 text-[10px] whitespace-nowrap"
+                                >
+                                  Global Stock OK
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="border-rose-200 text-rose-700 bg-rose-50 text-[10px] whitespace-nowrap"
+                                >
+                                  Short (-{m.shortage?.toFixed(1)})
+                                </Badge>
+                              )}
                             </TableCell>
                           </TableRow>
                         );
@@ -507,6 +564,23 @@ export function CreateWorkOrderDialog({
                 className="text-sm resize-none"
               />
             </div>
+
+            {/* Auto-reserve and freeze customer stock */}
+            <div className="flex items-start gap-3 p-3 bg-amber-50/70 rounded-lg border border-amber-200">
+              <input
+                type="checkbox"
+                id="freezeStock"
+                checked={freezeStock}
+                onChange={(e) => setFreezeStock(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <label htmlFor="freezeStock" className="text-xs text-amber-950 font-medium cursor-pointer select-none">
+                <span className="font-semibold">Freeze & Reserve Customer Stock Immediately</span>
+                <span className="block text-[11px] text-amber-800/90 font-normal mt-0.5 leading-relaxed">
+                  Locks the customer's raw materials so no other order can use them, and deducts them from globally available stock upon creation.
+                </span>
+              </label>
+            </div>
           </div>
 
           <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between -mx-6 -mb-5 sticky bottom-0">
@@ -526,7 +600,7 @@ export function CreateWorkOrderDialog({
               disabled={loading}
               className="h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer shadow-xs"
             >
-              {loading ? 'Generating...' : 'Create Draft Work Order'}
+              {loading ? 'Creating...' : freezeStock ? 'Create & Freeze Stock' : 'Create Draft Work Order'}
             </Button>
           </div>
         </form>

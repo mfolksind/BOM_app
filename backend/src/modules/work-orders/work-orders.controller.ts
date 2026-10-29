@@ -64,14 +64,20 @@ export class WorkOrdersController {
 
   async confirmWorkOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const autoReserve = Boolean(
+        req.body?.autoReserve ?? req.body?.reserveMaterials ?? req.query?.autoReserve,
+      );
       const result = await workOrdersService.confirmWorkOrder(
         req.params.id,
         req.user?._id?.toString(),
+        autoReserve,
       );
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: 'Work order confirmed and BOM snapshot captured successfully',
+        message: autoReserve
+          ? 'Work order confirmed and stock reserved successfully'
+          : 'Work order confirmed and BOM snapshot captured successfully',
         data: result,
       });
     } catch (err) {
@@ -238,6 +244,38 @@ export class WorkOrdersController {
         success: true,
         statusCode: 200,
         message: 'Work order completed successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getWorkOrderScrap(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await workOrdersService.getWorkOrderScrap(req.params.id);
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Work order scrap and tolerance details retrieved successfully',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async recordWorkOrderScrap(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await workOrdersService.recordWorkOrderScrap(
+        req.params.id,
+        req.body,
+        req.user?._id?.toString(),
+      );
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Scrap recorded and credited to scrap inventory successfully',
         data: result,
       });
     } catch (err) {

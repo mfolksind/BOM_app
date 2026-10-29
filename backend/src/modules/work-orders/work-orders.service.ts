@@ -14,6 +14,7 @@ import { MaterialConsumptionModel } from '../production/material-consumption.mod
 import { MaterialReturnModel } from '../production/material-return.model';
 import { ScrapRecordModel } from '../production/scrap-record.model';
 import { ProductionOutputModel } from '../production/production-output.model';
+import { WarehouseModel } from '../warehouses/warehouse.model';
 import { inventoryBalanceService } from '../inventory/inventory-balance.service';
 import { InventorySequenceUtil } from '../inventory/inventory-sequence.util';
 import { InventoryAuditUtil } from '../inventory/inventory-audit.util';
@@ -35,6 +36,8 @@ export interface CreateWorkOrderDto {
   notes?: string;
   remarks?: string;
   customerSpecifications?: string;
+  confirmAndReserve?: boolean;
+  autoReserve?: boolean;
 }
 
 export interface ListWorkOrdersFilter {
@@ -105,6 +108,16 @@ export class WorkOrdersService {
         performedBy: userId,
         newValues: { workOrderNumber, status: 'DRAFT' },
       });
+    }
+
+    if (dto.confirmAndReserve || dto.autoReserve) {
+      await this.confirmWorkOrder(workOrder._id.toString(), userId);
+      try {
+        await this.reserveMaterials(workOrder._id.toString(), userId);
+      } catch (err) {
+        console.warn('Auto stock reservation notice:', err);
+      }
+      return (await WorkOrderModel.findById(workOrder._id)) || workOrder;
     }
 
     return workOrder;
@@ -229,7 +242,11 @@ export class WorkOrdersService {
   /**
    * Confirm work order and snapshot BOM
    */
-  async confirmWorkOrder(id: string, userId?: string): Promise<IWorkOrder> {
+  async confirmWorkOrder(
+    id: string,
+    userId?: string,
+    autoReserve: boolean = false,
+  ): Promise<IWorkOrder> {
     const workOrder = await WorkOrderModel.findById(id);
     if (!workOrder) {
       throw new NotFoundError(`Work order with ID '${id}' not found`);
@@ -296,7 +313,16 @@ export class WorkOrdersService {
       });
     }
 
-    return workOrder;
+    // Automatically reserve required materials when autoReserve is requested
+    if (autoReserve) {
+      try {
+        await this.reserveMaterials(workOrder._id.toString(), userId);
+      } catch (err: any) {
+        console.warn('Stock reservation notice during work order confirmation:', err?.message || err);
+      }
+    }
+
+    return (await WorkOrderModel.findById(workOrder._id)) || workOrder;
   }
 
   /**
@@ -687,10 +713,14 @@ export class WorkOrdersService {
           : [];
 
         const customerOnHand = customerBalances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        const customerReserved = customerBalances.reduce((sum, b) => sum + b.quantityReserved, 0);
         const customerAvailable = customerBalances.reduce((sum, b) => sum + b.quantityAvailable, 0);
 
         const availableStock = globalAvailable;
         const shortage = Number(Math.max(0, requiredQuantity - availableStock).toFixed(4));
+        const customerShortage = dto.customerId
+          ? Number(Math.max(0, requiredQuantity - customerAvailable).toFixed(4))
+          : 0;
 
         return {
           materialId: item.materialId,
@@ -701,10 +731,14 @@ export class WorkOrdersService {
           availableStock: Number(availableStock.toFixed(4)),
           globalAvailableQuantity: Number(globalAvailable.toFixed(4)),
           globalOnHandQuantity: Number(globalOnHand.toFixed(4)),
+          globalReservedQuantity: Number(globalReserved.toFixed(4)),
           customerAvailableQuantity: Number(customerAvailable.toFixed(4)),
           customerOnHandQuantity: Number(customerOnHand.toFixed(4)),
+          customerReservedQuantity: Number(customerReserved.toFixed(4)),
           shortage,
+          customerShortage,
           isSufficient: shortage === 0,
+          isCustomerSufficient: dto.customerId ? customerShortage === 0 : true,
         };
       }),
     );
@@ -1118,6 +1152,154 @@ export class WorkOrdersService {
     }
 
     return workOrder;
+  }
+
+  /**
+   * Get scrap records and planned scrap tolerance comparison for a Work Order
+   */
+  async getWorkOrderScrap(id: string) {
+    const workOrder = await WorkOrderModel.findById(id)
+      .populate('customerId', 'code name legalName')
+      .populate('productId', 'code name description');
+    if (!workOrder) throw new NotFoundError(`Work order with ID '${id}' not found`);
+
+    const { requirements } = await this.getMaterialRequirements(id);
+
+    const scrapRecords = await ScrapRecordModel.find({ workOrderId: workOrder._id })
+      .populate('materialId', 'code name baseUnit category')
+      .populate('scrapWarehouseId', 'code name')
+      .sort({ createdAt: -1 });
+
+    const scrapByMaterial = new Map<string, number>();
+    for (const s of scrapRecords) {
+      const mid = s.materialId?._id?.toString() || s.materialId?.toString();
+      scrapByMaterial.set(mid, (scrapByMaterial.get(mid) || 0) + s.scrapQuantity);
+    }
+
+    const materialScrapBreakdown = requirements.map((req) => {
+      const mid = req.materialId.toString();
+      const actualScrap = Number((scrapByMaterial.get(mid) || 0).toFixed(4));
+      const plannedScrap = req.scrapAllowance;
+      const variance = Number((actualScrap - plannedScrap).toFixed(4));
+      return {
+        materialId: req.materialId,
+        materialCode: req.materialCode,
+        materialName: req.materialName,
+        unit: req.unit,
+        standardQuantity: req.standardQuantity,
+        plannedScrapAllowance: plannedScrap,
+        actualScrapQuantity: actualScrap,
+        scrapVariance: variance,
+        withinTolerance: actualScrap <= plannedScrap,
+      };
+    });
+
+    const totalPlannedScrapKg = materialScrapBreakdown.reduce(
+      (sum, m) => sum + m.plannedScrapAllowance,
+      0,
+    );
+    const totalActualScrapKg = scrapRecords.reduce((sum, s) => sum + s.scrapQuantity, 0);
+
+    return {
+      workOrder: {
+        _id: workOrder._id,
+        workOrderNumber: workOrder.workOrderNumber,
+        customer: workOrder.customerId,
+        product: workOrder.productId,
+        orderedLengthMeters: workOrder.orderedLengthMeters,
+        status: workOrder.status,
+      },
+      summary: {
+        totalPlannedScrapKg: Number(totalPlannedScrapKg.toFixed(2)),
+        totalActualScrapKg: Number(totalActualScrapKg.toFixed(2)),
+        totalScrapRecords: scrapRecords.length,
+      },
+      materialBreakdown: materialScrapBreakdown,
+      scrapRecords,
+    };
+  }
+
+  /**
+   * Record scrap party-wise / customer-wise for a specific Work Order
+   */
+  async recordWorkOrderScrap(
+    id: string,
+    dto: {
+      materialId: string;
+      scrapQuantity: number;
+      scrapType: string;
+      scrapCategory?: string;
+      scrapWarehouseId?: string;
+      reason?: string;
+      unit?: string;
+    },
+    userId?: string,
+  ) {
+    const workOrder = await WorkOrderModel.findById(id);
+    if (!workOrder) throw new NotFoundError(`Work order with ID '${id}' not found`);
+
+    const customer = await CustomerModel.findById(workOrder.customerId);
+    if (!customer) throw new NotFoundError('Customer not found');
+
+    const material = await MaterialModel.findById(dto.materialId);
+    if (!material) throw new NotFoundError('Material not found');
+
+    let scrapWarehouseId = dto.scrapWarehouseId;
+    if (!scrapWarehouseId) {
+      const scrapWh = await WarehouseModel.findOne({
+        $or: [{ type: 'SCRAP' }, { code: { $regex: /SCRAP/i } }],
+        isActive: true,
+      });
+      scrapWarehouseId = scrapWh ? scrapWh._id.toString() : undefined;
+    }
+    if (!scrapWarehouseId) {
+      const defaultWh = await WarehouseModel.findOne({ isActive: true });
+      if (!defaultWh) throw new NotFoundError('No warehouse found for scrap storage');
+      scrapWarehouseId = defaultWh._id.toString();
+    }
+
+    return await TransactionUtil.runInTransaction(async (session) => {
+      // 1. Increase stock in scrap warehouse (customer-owned scrap)
+      await inventoryBalanceService.increaseStock({
+        materialId: material._id.toString(),
+        warehouseId: scrapWarehouseId!,
+        ownerType: 'CUSTOMER',
+        customerId: customer._id.toString(),
+        quantity: dto.scrapQuantity,
+        unit: dto.unit || material.baseUnit || 'KG',
+        session,
+      });
+
+      // 2. Create ScrapRecord with workOrderId and customerId
+      const scrapNumber = await InventorySequenceUtil.getNextSequence('SCRAP', 'SCR', session);
+      const [scrap] = await ScrapRecordModel.create(
+        [
+          {
+            scrapNumber,
+            workOrderId: workOrder._id,
+            customerId: customer._id,
+            ownerType: 'CUSTOMER',
+            materialId: material._id,
+            scrapType: dto.scrapType || 'PROCESS_WASTE',
+            scrapCategory: dto.scrapCategory || 'SALEABLE',
+            scrapQuantity: dto.scrapQuantity,
+            unit: dto.unit || material.baseUnit || 'KG',
+            scrapWarehouseId: new mongoose.Types.ObjectId(scrapWarehouseId),
+            status: 'POSTED',
+            reason:
+              dto.reason ||
+              `Work Order ${workOrder.workOrderNumber} scrap for customer ${customer.name}`,
+            recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+            recordedAt: new Date(),
+            postedAt: new Date(),
+            postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+          },
+        ],
+        { session },
+      );
+
+      return scrap;
+    });
   }
 }
 

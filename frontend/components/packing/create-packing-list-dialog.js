@@ -5,12 +5,12 @@ import { apiClient } from '@/lib/api';
 import { toast } from 'sonner';
 
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,6 +49,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
   const [workOrders, setWorkOrders] = useState([]);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState(null);
   const [availableDrums, setAvailableDrums] = useState([]);
+  const [selectedRgp, setSelectedRgp] = useState('ALL');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
 
@@ -76,6 +77,21 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
       remarks: 'STD.LENGTH',
     },
   ]);
+
+  // Derived RGP tracking
+  const uniqueRgps = Array.from(
+    new Set(availableDrums.map((d) => d.refRgpNumber).filter(Boolean)),
+  );
+
+  const drumsForRgp =
+    selectedRgp === 'ALL'
+      ? availableDrums
+      : availableDrums.filter((d) => d.refRgpNumber === selectedRgp);
+
+  const allocatedDrumIds = new Set(lines.map((l) => l.drumId).filter(Boolean));
+  const remainingDrumsForRgp = drumsForRgp.filter((d) => !allocatedDrumIds.has(d._id));
+  const isRgpExhausted =
+    selectedRgp !== 'ALL' && drumsForRgp.length > 0 && remainingDrumsForRgp.length === 0;
 
   // Fetch Work Orders
   const fetchWorkOrders = async () => {
@@ -175,18 +191,19 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
       }
     }
 
-    if (availableDrums.length === 0) {
+    const drumsPool = selectedRgp === 'ALL' ? availableDrums : drumsForRgp;
+    if (drumsPool.length === 0) {
       toast.warning(
-        'No empty returnable drums currently in yard for this customer. Generating placeholder drum rows.'
+        'No empty returnable drums currently in yard for this selection. Generating placeholder drum rows with manual numbers.'
       );
-    } else if (availableDrums.length < splits.length) {
+    } else if (drumsPool.length < splits.length) {
       toast.warning(
-        `Customer has ${availableDrums.length} empty drums in yard. Allocated all available drums, and added placeholders for remaining.`
+        `Selection has ${drumsPool.length} empty drums in yard. Allocated all available drums, and added placeholders for remaining.`
       );
     }
 
     const newLines = splits.map((len, idx) => {
-      const drum = availableDrums[idx];
+      const drum = drumsPool[idx];
       const sizeStr =
         drum?.drumSize ||
         drum?.sizeDescription ||
@@ -201,7 +218,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
         lengthTop: len,
         lengthTotal: len,
         drumSize: sizeStr,
-        refRgpNumber: drum?.refRgpNumber || selectedWorkOrder?.customerPoNumber || '',
+        refRgpNumber: drum?.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : selectedWorkOrder?.customerPoNumber || ''),
         drumType: drum?.drumType || 'WOODEN',
         remarks: 'STD.LENGTH',
       };
@@ -215,7 +232,10 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
 
   const handleAddLine = () => {
     const nextIdx = lines.length;
-    const drum = availableDrums[nextIdx];
+    const drumsPool = selectedRgp === 'ALL' ? availableDrums : drumsForRgp;
+    const allocatedIds = new Set(lines.map((l) => l.drumId).filter(Boolean));
+    const unallocated = drumsPool.filter((d) => !allocatedIds.has(d._id));
+    const drum = unallocated[0];
     const sizeStr =
       drum?.drumSize ||
       drum?.sizeDescription ||
@@ -232,7 +252,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
         lengthTop: capacity,
         lengthTotal: capacity,
         drumSize: sizeStr,
-        refRgpNumber: drum?.refRgpNumber || '',
+        refRgpNumber: drum?.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : ''),
         drumType: drum?.drumType || 'WOODEN',
         remarks: 'STD.LENGTH',
       },
@@ -256,6 +276,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
       const cur = updated[index];
       const sizeStr =
         drum.sizeDescription ||
+        drum.drumSize ||
         (drum.flangeDiameterMm && drum.barrelDiameterMm && drum.traverseWidthMm
           ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
           : '44X16X24');
@@ -265,7 +286,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
         drumId: drum._id,
         drumNumber: drum.drumNumber,
         drumSize: sizeStr,
-        refRgpNumber: drum.refRgpNumber || '',
+        refRgpNumber: drum.refRgpNumber || cur.refRgpNumber || '',
         drumType: drum.drumType || 'WOODEN',
       };
       return updated;
@@ -277,10 +298,11 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
       const updated = [...prev];
       const cur = { ...updated[index], [field]: value };
 
+      // User requirement: Length Total = Length Top - Length Bottom
       if (field === 'lengthBottom' || field === 'lengthTop') {
         const b = field === 'lengthBottom' ? Number(value) || 0 : Number(cur.lengthBottom) || 0;
         const t = field === 'lengthTop' ? Number(value) || 0 : Number(cur.lengthTop) || 0;
-        cur.lengthTotal = Number((b + t).toFixed(2));
+        cur.lengthTotal = Number(Math.max(0, t - b).toFixed(2));
       }
 
       updated[index] = cur;
@@ -297,9 +319,9 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
       return;
     }
 
-    const invalidLine = lines.find((l) => !l.drumId);
+    const invalidLine = lines.find((l) => !l.drumNumber?.trim());
     if (invalidLine) {
-      toast.error('Please assign a valid Cable Drum for all rows');
+      toast.error('Please specify a Drum Number (D.NO) for all rows');
       return;
     }
 
@@ -317,16 +339,16 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
         sizeDescription,
         packingDate: new Date(packingDate).toISOString(),
         lines: lines.map((l, idx) => ({
-          drumId: l.drumId,
+          drumId: l.drumId || undefined,
           sNo: idx + 1,
-          drumNumber: l.drumNumber,
+          drumNumber: l.drumNumber.trim(),
           lengthBottom: Number(l.lengthBottom) || 0,
           lengthTop: Number(l.lengthTop) || 0,
           lengthTotal: Number(l.lengthTotal) || 0,
           lengthMeters: Number(l.lengthTotal) || 0,
-          drumSize: l.drumSize,
-          refRgpNumber: l.refRgpNumber,
-          drumType: l.drumType,
+          drumSize: l.drumSize || '44X16X24',
+          refRgpNumber: l.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : ''),
+          drumType: l.drumType || 'WOODEN',
           remarks: l.remarks || 'STD.LENGTH',
         })),
       };
@@ -361,25 +383,32 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-6 bg-slate-50">
-        <DialogHeader className="border-b border-slate-200 pb-4 bg-white -mx-6 -mt-6 p-6 sticky top-0 z-20 shadow-xs">
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 bg-orange-50 text-orange-700 rounded-lg border border-orange-200">
-              <Package className="w-5 h-5" />
-            </span>
-            <div>
-              <DialogTitle className="text-xl font-bold text-slate-900">
-                New Cable Packaging &amp; Drum List
-              </DialogTitle>
-              <DialogDescription className="text-xs text-slate-500 mt-0.5">
-                Allocate customer returnable drums received via Inbound Challan for the PO length (Image 1).
-              </DialogDescription>
-            </div>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-3xl md:max-w-4xl lg:w-[68vw] lg:max-w-[1100px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+      >
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* Header */}
+          <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80 shrink-0">
+            <SheetHeader className="p-0">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 bg-orange-50 text-orange-700 rounded-xl border border-orange-200">
+                  <Package className="w-5 h-5" />
+                </span>
+                <div>
+                  <SheetTitle className="text-xl font-bold text-slate-900">
+                    New Cable Packaging &amp; Drum List
+                  </SheetTitle>
+                  <SheetDescription className="text-xs text-slate-500 mt-0.5">
+                    Allocate customer returnable drums received via Inbound Challan for the PO length.
+                  </SheetDescription>
+                </div>
+              </div>
+            </SheetHeader>
           </div>
-        </DialogHeader>
 
-        <div className="space-y-5 mt-4">
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-slate-50">
           {/* Header Metadata matching Image 1 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
             <div className="space-y-1.5">
@@ -512,14 +541,16 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
                     Customer Drums in Yard
                   </span>
                   <div className="text-base font-bold font-mono text-emerald-700 mt-0.5 flex items-center gap-1.5">
-                    {availableDrums.length} empty
-                    {availableDrums.length > 0 && (
+                    {drumsForRgp.length} empty
+                    {drumsForRgp.length > 0 && (
                       <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 py-0">
-                        Available
+                        {selectedRgp !== 'ALL' ? `RGP: ${selectedRgp}` : 'Available'}
                       </Badge>
                     )}
                   </div>
-                  <span className="text-[10px] text-slate-500 block">Received on Inbound Challan</span>
+                  <span className="text-[10px] text-slate-500 block">
+                    {selectedRgp !== 'ALL' ? `${remainingDrumsForRgp.length} unallocated` : 'Received on Inbound Challan'}
+                  </span>
                 </div>
 
                 <div className="bg-white/80 p-2.5 rounded-lg border border-orange-200/60">
@@ -553,12 +584,73 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
                 </div>
               </div>
 
-              {/* Status Notice */}
-              {availableDrums.length < estimatedDrumsNeeded && targetPoLength > 0 && (
+              {/* RGP-Wise Drum Selection Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 bg-orange-100/50 rounded-lg border border-orange-200 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-orange-950">Customer RGP Batch:</span>
+                  <Select value={selectedRgp} onValueChange={setSelectedRgp}>
+                    <SelectTrigger className="h-7 text-xs bg-white border-orange-300 w-56 font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL" className="text-xs">
+                        All RGPs ({availableDrums.length} empty drums)
+                      </SelectItem>
+                      {uniqueRgps.map((rgp) => {
+                        const count = availableDrums.filter((d) => d.refRgpNumber === rgp).length;
+                        return (
+                          <SelectItem key={rgp} value={rgp} className="text-xs font-mono">
+                            RGP: {rgp} ({count} in yard)
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="text-[11px] text-orange-900 font-mono">
+                  {selectedRgp !== 'ALL' ? (
+                    <span>
+                      RGP #{selectedRgp}: <strong>{remainingDrumsForRgp.length}</strong> available / {drumsForRgp.length} total
+                    </span>
+                  ) : (
+                    <span>Total Available in Yard: <strong>{availableDrums.length}</strong></span>
+                  )}
+                </div>
+              </div>
+
+              {/* RGP Exhaustion Alert Banner */}
+              {isRgpExhausted && (
+                <div className="flex items-start justify-between gap-3 text-xs bg-rose-50 border border-rose-300 text-rose-800 p-3 rounded-xl shadow-xs">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-rose-950">
+                        Customer Drums Exhausted for RGP #{selectedRgp}
+                      </p>
+                      <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
+                        All returnable drums under RGP #{selectedRgp} have been allocated. Please request more drums from the customer via Inbound RGP Challan, or save this packing list as <strong>Draft</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => handleSubmit(false)}
+                    className="h-7 text-xs border-rose-300 bg-white text-rose-800 hover:bg-rose-100 font-semibold shrink-0 cursor-pointer"
+                  >
+                    Save as Draft
+                  </Button>
+                </div>
+              )}
+
+              {/* Standard Capacity Notice */}
+              {drumsForRgp.length < estimatedDrumsNeeded && targetPoLength > 0 && !isRgpExhausted && (
                 <div className="flex items-center gap-2 text-xs bg-amber-100/70 border border-amber-300 text-amber-800 p-2 rounded-lg">
                   <AlertCircle className="w-4 h-4 shrink-0 text-amber-700" />
                   <span>
-                    Notice: Yard has {availableDrums.length} empty drums, but {estimatedDrumsNeeded} are required for this PO. You can receive more drums via Inbound Challan or allocate factory drums.
+                    Notice: Yard has {drumsForRgp.length} empty drums for this selection, but {estimatedDrumsNeeded} are required for this PO. You can enter manual drum numbers or receive more drums via Inbound Challan.
                   </span>
                 </div>
               )}
@@ -616,24 +708,46 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
                       {idx + 1}
                     </TableCell>
 
-                    {/* D.NO (Select Drum) */}
+                    {/* D.NO (Type Manual Drum # or Pick from Yard) */}
                     <TableCell>
-                      <Select
-                        value={line.drumId}
-                        onValueChange={(val) => handleDrumSelect(idx, val)}
-                      >
-                        <SelectTrigger className="h-8 text-xs font-mono font-semibold bg-white">
-                          <SelectValue placeholder="Select Drum..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableDrums.map((drum) => (
-                            <SelectItem key={drum._id} value={drum._id} className="text-xs font-mono">
-                              {drum.drumNumber} ({drum.sizeDescription || drum.drumSize || '44X16X24'}){' '}
-                              {drum.refRgpNumber ? `[RGP: ${drum.refRgpNumber}]` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={line.drumNumber}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            handleLineChange(idx, 'drumNumber', val);
+                            const match = drumsForRgp.find(
+                              (d) => d.drumNumber?.toLowerCase() === val.trim().toLowerCase(),
+                            );
+                            if (match) {
+                              handleDrumSelect(idx, match._id);
+                            }
+                          }}
+                          placeholder="D.NO / Drum #"
+                          className="h-8 text-xs font-mono font-semibold bg-white"
+                        />
+                        {drumsForRgp.length > 0 && (
+                          <Select
+                            value={line.drumId || ''}
+                            onValueChange={(val) => handleDrumSelect(idx, val)}
+                          >
+                            <SelectTrigger
+                              className="h-8 w-8 px-0 justify-center bg-slate-50 border-slate-200 cursor-pointer shrink-0"
+                              title="Select from Yard"
+                            >
+                              <Package className="w-3.5 h-3.5 text-slate-500" />
+                            </SelectTrigger>
+                            <SelectContent align="end" className="max-h-56">
+                              {drumsForRgp.map((drum) => (
+                                <SelectItem key={drum._id} value={drum._id} className="text-xs font-mono">
+                                  {drum.drumNumber} ({drum.sizeDescription || drum.drumSize || '44X16X24'})
+                                  {drum.refRgpNumber ? ` [RGP: ${drum.refRgpNumber}]` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
                     </TableCell>
 
                     {/* LENGTH BOTTOM */}
@@ -745,13 +859,16 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
             </Table>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+          </div>
+
+          {/* Sticky Footer */}
+          <div className="px-6 py-3.5 bg-white border-t border-slate-200 flex items-center justify-between shrink-0">
             <Button
               type="button"
               variant="outline"
+              size="sm"
               onClick={() => onOpenChange(false)}
-              className="text-xs"
+              className="text-xs border-slate-200 cursor-pointer"
             >
               Cancel
             </Button>
@@ -760,6 +877,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 disabled={isSubmitting}
                 onClick={() => handleSubmit(false)}
                 className="text-xs border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer"
@@ -770,6 +888,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
               <Button
                 type="button"
                 disabled={isSubmitting}
+                size="sm"
                 onClick={() => handleSubmit(true)}
                 className="text-xs bg-orange-600 hover:bg-orange-700 text-white font-semibold gap-1.5 shadow-xs cursor-pointer"
               >
@@ -779,7 +898,7 @@ export function CreatePackingListDialog({ open, onOpenChange, onSuccess, default
             </div>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

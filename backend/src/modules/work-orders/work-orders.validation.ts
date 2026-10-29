@@ -19,6 +19,8 @@ export const createWorkOrderSchema = {
     notes: z.string().trim().optional(),
     remarks: z.string().trim().optional(),
     customerSpecifications: z.string().trim().optional(),
+    confirmAndReserve: z.boolean().optional(),
+    autoReserve: z.boolean().optional(),
   }),
 };
 
@@ -86,5 +88,20 @@ export const completeWorkOrderSchema = {
   body: z.object({
     remarks: z.string().trim().optional(),
     force: z.boolean().default(false),
+  }),
+};
+
+export const recordWorkOrderScrapSchema = {
+  params: z.object({
+    id: objectIdSchema,
+  }),
+  body: z.object({
+    materialId: objectIdSchema,
+    scrapQuantity: z.number().positive('Scrap quantity must be greater than 0'),
+    scrapType: z.string().trim().default('PROCESS_WASTE'),
+    scrapCategory: z.string().trim().default('SALEABLE').optional(),
+    scrapWarehouseId: objectIdSchema.optional(),
+    reason: z.string().trim().optional(),
+    unit: z.string().trim().optional(),
   }),
 };

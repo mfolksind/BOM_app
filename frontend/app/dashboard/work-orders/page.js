@@ -40,6 +40,7 @@ import {
 
 import { CreateWorkOrderDialog } from '@/components/work-orders/create-work-order-dialog';
 import { EditWorkOrderDialog } from '@/components/work-orders/edit-work-order-dialog';
+import { RecordWorkOrderScrapDialog } from '@/components/work-orders/record-work-order-scrap-dialog';
 
 import {
   FileSpreadsheet,
@@ -57,6 +58,7 @@ import {
   Eye,
   Pencil,
   Lock,
+  Scale,
 } from 'lucide-react';
 
 export default function WorkOrdersPage() {
@@ -83,6 +85,8 @@ export default function WorkOrdersPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [activeWorkOrderId, setActiveWorkOrderId] = useState(null);
   const [dialogMode, setDialogMode] = useState('view');
+  const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
+  const [scrapWorkOrderId, setScrapWorkOrderId] = useState(null);
 
   const fetchDropdownData = useCallback(async () => {
     try {
@@ -154,11 +158,11 @@ export default function WorkOrdersPage() {
   };
 
   const handleConfirmWorkOrder = async (woId) => {
-    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe into an immutable snapshot for production.')) return;
+    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe and reserves/freezes required material stock.')) return;
     try {
-      const res = await api.post(`/work-orders/${woId}/confirm`, {});
+      const res = await api.post(`/work-orders/${woId}/confirm`, { autoReserve: true });
       if (res?.success) {
-        toast.success('Work Order confirmed and BOM snapshot frozen');
+        toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
         fetchWorkOrders(pagination.page);
       }
     } catch (err) {
@@ -484,6 +488,16 @@ export default function WorkOrdersPage() {
                                 <Eye className="w-4 h-4 text-slate-500" />
                                 View Details & Norms
                               </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setScrapWorkOrderId(wo._id);
+                                  setScrapDialogOpen(true);
+                                }}
+                                className="cursor-pointer gap-2 text-rose-700 font-medium"
+                              >
+                                <Scale className="w-4 h-4 text-rose-600" />
+                                Record / View Scrap
+                              </DropdownMenuItem>
 
                               {wo.status === 'DRAFT' && (
                                 <DropdownMenuItem
@@ -575,6 +589,14 @@ export default function WorkOrdersPage() {
         open={editOpen}
         onOpenChange={setEditOpen}
         initialMode={dialogMode}
+        onSuccess={() => fetchWorkOrders(pagination.page)}
+      />
+
+      {/* Record Scrap & Tolerance Comparison Dialog */}
+      <RecordWorkOrderScrapDialog
+        workOrderId={scrapWorkOrderId}
+        open={scrapDialogOpen}
+        onOpenChange={setScrapDialogOpen}
         onSuccess={() => fetchWorkOrders(pagination.page)}
       />
     </div>

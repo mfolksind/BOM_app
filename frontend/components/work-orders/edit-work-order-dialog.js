@@ -40,10 +40,11 @@ import {
   PauseCircle,
   PlayCircle,
   Package,
-  Layers,
   Calendar,
   AlertTriangle,
+  Scale,
 } from 'lucide-react';
+import { RecordWorkOrderScrapDialog } from '@/components/work-orders/record-work-order-scrap-dialog';
 
 const PRIORITIES = [
   { label: 'Low', value: 'LOW' },
@@ -64,6 +65,7 @@ export function EditWorkOrderDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [workOrder, setWorkOrder] = useState(null);
   const [availability, setAvailability] = useState(null);
+  const [scrapOpen, setScrapOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     orderedLengthMeters: '',
@@ -169,16 +171,29 @@ export function EditWorkOrderDialog({
   };
 
   const handleConfirm = async () => {
-    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe into an immutable snapshot for production.')) return;
+    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe and reserves/freezes required material stock.')) return;
     try {
-      const res = await api.post(`/work-orders/${workOrderId}/confirm`, {});
+      const res = await api.post(`/work-orders/${workOrderId}/confirm`, { autoReserve: true });
       if (res?.success) {
-        toast.success('Work Order confirmed and BOM snapshot frozen');
+        toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
         loadData(workOrderId);
         if (onSuccess) onSuccess();
       }
     } catch (err) {
       toast.error(err.message || 'Failed to confirm work order');
+    }
+  };
+
+  const handleReserveMaterials = async () => {
+    try {
+      const res = await api.post(`/work-orders/${workOrderId}/reserve-materials`, {});
+      if (res?.success) {
+        toast.success('Materials reserved & stock frozen successfully');
+        loadData(workOrderId);
+        if (onSuccess) onSuccess();
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to reserve materials');
     }
   };
 
@@ -254,7 +269,7 @@ export function EditWorkOrderDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl md:max-w-2xl lg:w-[48vw] lg:max-w-[840px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+        className="w-full sm:max-w-2xl md:max-w-3xl lg:w-[56vw] lg:max-w-[960px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
       >
         {/* Drawer Header */}
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
@@ -509,58 +524,105 @@ export function EditWorkOrderDialog({
               {/* Material Availability & Allocation Section */}
               {availability?.materials && availability.materials.length > 0 && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-semibold text-slate-900 text-sm">
-                      Material Availability Analysis
-                    </h4>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-semibold text-slate-900 text-sm">
+                        Material Availability & Stock Freezing Analysis
+                      </h4>
+                      <Badge variant="outline" className="text-[10px] bg-white border-slate-300 text-slate-700">
+                        Party vs Global Stock
+                      </Badge>
+                    </div>
                     <span className="text-xs text-slate-500">
-                      Warehouse stock vs required norm
+                      Live On-Hand vs Frozen (Reserved) vs Free Available
                     </span>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                    <Table>
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-xs bg-white">
+                    <Table className="min-w-[700px]">
                       <TableHeader className="bg-slate-50/80">
                         <TableRow>
-                          <TableHead className="text-xs font-semibold text-slate-700">Material</TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-700">Required</TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-700">Available (Global)</TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-700">Shortage</TableHead>
-                          <TableHead className="text-center text-xs font-semibold text-slate-700">Status</TableHead>
+                          <TableHead className="text-xs font-semibold text-slate-700 py-2">Material</TableHead>
+                          <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Required Norm</TableHead>
+                          <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Customer Stock</TableHead>
+                          <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Global Stock</TableHead>
+                          <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Frozen in This Order</TableHead>
+                          <TableHead className="text-center text-xs font-semibold text-slate-700 py-2">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {availability.materials.map((m, idx) => {
                           const shortageVal = m.shortage ?? m.shortageQuantity ?? 0;
                           const isShort = shortageVal > 0;
-                          const availableVal = m.availableStock ?? m.eligibleAvailableQuantity ?? 0;
+                          const custAvail = m.customerAvailableQuantity || 0;
+                          const custOnHand = m.customerOnHandQuantity || 0;
+                          const custFrozen = m.customerReservedQuantity || 0;
+                          const globAvail = m.globalAvailableQuantity ?? m.availableStock ?? 0;
+                          const globOnHand = m.globalOnHandQuantity || 0;
+                          const globFrozen = m.globalReservedQuantity || 0;
+                          const reservedThis = m.reservedForThisOrder || 0;
+
                           return (
                             <TableRow key={idx} className="hover:bg-slate-50/60">
-                              <TableCell>
+                              <TableCell className="py-2">
                                 <div className="font-semibold text-slate-900 text-xs">{m.materialName}</div>
-                                <div className="text-[11px] text-slate-400 font-mono">{m.materialCode}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">{m.materialCode}</div>
                               </TableCell>
-                              <TableCell className="text-right text-xs text-slate-700 font-medium">
+                              <TableCell className="text-right text-xs text-slate-800 font-semibold py-2">
                                 {m.requiredQuantity?.toFixed(2)} {m.unit}
                               </TableCell>
-                              <TableCell className="text-right text-xs font-medium">
-                                <span className="text-slate-900 font-semibold">{availableVal.toFixed(2)} {m.unit}</span>
-                                {m.customerAvailableQuantity > 0 && (
-                                  <span className="block text-[10px] text-slate-400 font-normal">
-                                    Customer: {m.customerAvailableQuantity.toFixed(2)} {m.unit}
-                                  </span>
+                              <TableCell className="text-right py-2">
+                                <div>
+                                  <div className={`font-bold text-xs ${custAvail >= m.requiredQuantity ? 'text-emerald-700' : custAvail > 0 ? 'text-amber-600' : 'text-slate-500'}`}>
+                                    {custAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
+                                    <span>On-Hand: <strong className="text-slate-700">{custOnHand.toFixed(1)}</strong></span>
+                                    <span>|</span>
+                                    <span>Frozen: <strong className={custFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{custFrozen.toFixed(1)}</strong></span>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right py-2">
+                                <div>
+                                  <div className="font-bold text-xs text-slate-900">
+                                    {globAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
+                                    <span>On-Hand: <strong className="text-slate-700">{globOnHand.toFixed(1)}</strong></span>
+                                    <span>|</span>
+                                    <span>Frozen: <strong className={globFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{globFrozen.toFixed(1)}</strong></span>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right py-2">
+                                {reservedThis > 0 ? (
+                                  <div className="font-mono text-xs font-bold text-blue-700">
+                                    {reservedThis.toFixed(2)} {m.unit}
+                                    <span className="block text-[10px] text-blue-500 font-sans font-normal">Locked</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-slate-400 font-mono">0.00</span>
                                 )}
                               </TableCell>
-                              <TableCell className={`text-right text-xs font-bold ${isShort ? 'text-rose-600' : 'text-emerald-700'}`}>
-                                {isShort ? `-${shortageVal.toFixed(2)}` : '0.00'} {m.unit}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge
-                                  variant="outline"
-                                  className={isShort ? 'border-rose-200 text-rose-700 bg-rose-50 text-[10px]' : 'border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]'}
-                                >
-                                  {isShort ? 'Shortage' : 'Available'}
-                                </Badge>
+                              <TableCell className="text-center py-2">
+                                {reservedThis >= m.requiredQuantity ? (
+                                  <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px] whitespace-nowrap">
+                                    Fully Frozen
+                                  </Badge>
+                                ) : reservedThis > 0 ? (
+                                  <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 text-[10px] whitespace-nowrap">
+                                    Partially Frozen
+                                  </Badge>
+                                ) : isShort ? (
+                                  <Badge variant="outline" className="border-rose-200 text-rose-700 bg-rose-50 text-[10px] whitespace-nowrap">
+                                    Short (-{shortageVal.toFixed(1)})
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="border-slate-200 text-slate-600 bg-slate-50 text-[10px] whitespace-nowrap">
+                                    Ready to Freeze
+                                  </Badge>
+                                )}
                               </TableCell>
                             </TableRow>
                           );
@@ -624,6 +686,16 @@ export function EditWorkOrderDialog({
               </Button>
 
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setScrapOpen(true)}
+                  className="h-9 text-xs border-rose-200 text-rose-700 hover:bg-rose-50 cursor-pointer"
+                >
+                  <Scale className="w-3.5 h-3.5 mr-1 text-rose-600" />
+                  Record Scrap
+                </Button>
+
                 {isDraft && (
                   <>
                     <Button
@@ -647,15 +719,27 @@ export function EditWorkOrderDialog({
                 )}
 
                 {isConfirmed && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleHold}
-                    className="h-9 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 cursor-pointer"
-                  >
-                    <PauseCircle className="w-3.5 h-3.5 mr-1" />
-                    Place On Hold
-                  </Button>
+                  <>
+                    {availability?.materials?.some((m) => (m.reservedForThisOrder || 0) < m.requiredQuantity) && (
+                      <Button
+                        size="sm"
+                        onClick={handleReserveMaterials}
+                        className="h-9 text-xs bg-blue-700 hover:bg-blue-800 text-white font-medium cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5 mr-1" />
+                        Freeze / Reserve Stock
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleHold}
+                      className="h-9 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 cursor-pointer"
+                    >
+                      <PauseCircle className="w-3.5 h-3.5 mr-1" />
+                      Place On Hold
+                    </Button>
+                  </>
                 )}
 
                 {isOnHold && (
@@ -673,6 +757,13 @@ export function EditWorkOrderDialog({
           </div>
         )}
       </SheetContent>
+
+      <RecordWorkOrderScrapDialog
+        workOrderId={workOrderId}
+        open={scrapOpen}
+        onOpenChange={setScrapOpen}
+        onSuccess={() => loadData(workOrderId)}
+      />
     </Sheet>
   );
 }
