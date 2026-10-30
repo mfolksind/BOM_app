@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/select';
 
 import { CustomerStockOverviewDialog } from '@/components/customers/customer-stock-overview-dialog';
+import { MaterialStockDetailsDialog } from '@/components/stock/material-stock-details-dialog';
 
 import {
   Warehouse,
@@ -51,6 +52,7 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   Clock,
+  Eye,
 } from 'lucide-react';
 
 export default function GlobalStockDashboardPage() {
@@ -61,15 +63,23 @@ export default function GlobalStockDashboardPage() {
   const [warehouses, setWarehouses] = useState([]);
   const [customers, setCustomers] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('balances');
+  const [activeTab, setActiveTab] = useState('materials');
   const [isLoading, setIsLoading] = useState(true);
   const [isBalancesLoading, setIsBalancesLoading] = useState(true);
+  const [materialSummaries, setMaterialSummaries] = useState([]);
+  const [isMaterialSummariesLoading, setIsMaterialSummariesLoading] = useState(true);
 
-  // Filters
+  // Filters for Balances
   const [search, setSearch] = useState('');
   const [warehouseFilter, setWarehouseFilter] = useState('ALL');
   const [ownerFilter, setOwnerFilter] = useState('ALL');
   const [customerFilter, setCustomerFilter] = useState('ALL');
+  const [materialFilter, setMaterialFilter] = useState('ALL');
+  const [materials, setMaterials] = useState([]);
+
+  // Filters for Material-Wise Global Stock
+  const [matSearch, setMatSearch] = useState('');
+  const [matCategoryFilter, setMatCategoryFilter] = useState('ALL');
 
   // Pagination for Balances
   const [pagination, setPagination] = useState({
@@ -79,20 +89,40 @@ export default function GlobalStockDashboardPage() {
     totalPages: 1,
   });
 
-  // Modal for Customer Stock
+  // Modal for Customer Stock & Material Details
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
 
-  // Fetch Master Data (Warehouses, Customers)
+  // Fetch Master Data (Warehouses, Customers, Materials)
   const fetchMasters = async () => {
     try {
-      const [whRes, custRes] = await Promise.all([
+      const [whRes, custRes, matRes] = await Promise.all([
         apiClient('/warehouses?limit=100'),
         apiClient('/customers?limit=100'),
+        apiClient('/materials?limit=100'),
       ]);
       if (whRes.data) setWarehouses(whRes.data);
       if (custRes.data) setCustomers(custRes.data);
+      if (matRes.data) {
+        setMaterials(Array.isArray(matRes.data) ? matRes.data : (matRes.data.items || []));
+      }
     } catch (err) {
       console.error('Failed to load masters for stock dashboard', err);
+    }
+  };
+
+  // Fetch Material-wise Global Stock Aggregation
+  const fetchMaterialSummaries = async () => {
+    setIsMaterialSummariesLoading(true);
+    try {
+      const res = await apiClient('/inventory/material-summary');
+      if (res.data) {
+        setMaterialSummaries(Array.isArray(res.data) ? res.data : []);
+      }
+    } catch (err) {
+      console.error('Failed to load material global summaries', err);
+    } finally {
+      setIsMaterialSummariesLoading(false);
     }
   };
 
@@ -120,6 +150,7 @@ export default function GlobalStockDashboardPage() {
         if (warehouseFilter !== 'ALL') params.append('warehouseId', warehouseFilter);
         if (ownerFilter !== 'ALL') params.append('ownerType', ownerFilter);
         if (customerFilter !== 'ALL') params.append('customerId', customerFilter);
+        if (materialFilter !== 'ALL') params.append('materialId', materialFilter);
 
         const res = await apiClient(`/inventory/balances?${params.toString()}`);
         if (res.data) {
@@ -151,7 +182,7 @@ export default function GlobalStockDashboardPage() {
         setIsBalancesLoading(false);
       }
     },
-    [pagination.limit, pagination.page, warehouseFilter, ownerFilter, customerFilter, search]
+    [pagination.limit, pagination.page, warehouseFilter, ownerFilter, customerFilter, materialFilter, search]
   );
 
   // Fetch Recent Transactions Ledger
@@ -181,12 +212,13 @@ export default function GlobalStockDashboardPage() {
   useEffect(() => {
     fetchMasters();
     fetchSummary();
+    fetchMaterialSummaries();
     fetchLowStock();
   }, []);
 
   useEffect(() => {
     fetchBalances(1);
-  }, [warehouseFilter, ownerFilter, customerFilter, search]);
+  }, [warehouseFilter, ownerFilter, customerFilter, materialFilter, search]);
 
   useEffect(() => {
     if (activeTab === 'ledger') {
@@ -198,6 +230,17 @@ export default function GlobalStockDashboardPage() {
   const ownerBreakdown = summaryData?.ownerTypeBreakdown || [];
   const factoryStock = summary.factoryOnHand ?? (ownerBreakdown.find((b) => b._id === 'FACTORY')?.totalOnHand || 0);
   const customerStock = summary.customerOnHand ?? (ownerBreakdown.find((b) => b._id === 'CUSTOMER')?.totalOnHand || 0);
+
+  const filteredMaterialSummaries = materialSummaries.filter((m) => {
+    const matchesSearch =
+      !matSearch.trim() ||
+      m.material?.name?.toLowerCase().includes(matSearch.trim().toLowerCase()) ||
+      m.material?.code?.toLowerCase().includes(matSearch.trim().toLowerCase());
+    const matchesCategory =
+      matCategoryFilter === 'ALL' ||
+      m.material?.category === matCategoryFilter;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div className="space-y-6 p-6">
@@ -232,76 +275,89 @@ export default function GlobalStockDashboardPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards (Clean, Professional, Unified Numbers) */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-        <Card className="border-slate-200 shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
               Total Stock On-Hand
             </span>
             <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
               {summary.totalOnHand ? summary.totalOnHand.toLocaleString('en-IN') : '0.00'}
               <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-slate-500 mt-1">All materials across all plants</div>
+            <div className="text-[11px] text-slate-400 mt-1">All materials across all plants</div>
           </CardContent>
         </Card>
 
-        <Card className="border-emerald-200 bg-emerald-50/20 shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
+            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
               Customer Job-Work Stock
             </span>
-            <div className="text-2xl font-bold text-emerald-700 font-mono mt-1">
+            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
               {customerStock ? customerStock.toLocaleString('en-IN') : '0.00'}
-              <span className="text-xs font-normal text-emerald-600 ml-1">kg</span>
+              <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-emerald-700 mt-1">Received on Inbound Challans</div>
+            <div className="text-[11px] text-slate-400 mt-1">Received on Inbound Challans</div>
           </CardContent>
         </Card>
 
-        <Card className="border-blue-200 bg-blue-50/20 shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-blue-800 uppercase tracking-wider block">
+            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
               Factory Owned Stock
             </span>
-            <div className="text-2xl font-bold text-blue-700 font-mono mt-1">
+            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
               {factoryStock ? factoryStock.toLocaleString('en-IN') : '0.00'}
-              <span className="text-xs font-normal text-blue-600 ml-1">kg</span>
+              <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-blue-700 mt-1">Internal factory purchases</div>
+            <div className="text-[11px] text-slate-400 mt-1">Internal factory purchases</div>
           </CardContent>
         </Card>
 
-        <Card className="border-amber-200 bg-amber-50/20 shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider block">
+            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
               Reserved in Production
             </span>
-            <div className="text-2xl font-bold text-amber-700 font-mono mt-1">
+            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
               {summary.totalReserved ? summary.totalReserved.toLocaleString('en-IN') : '0.00'}
-              <span className="text-xs font-normal text-amber-600 ml-1">kg</span>
+              <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-amber-700 mt-1">Committed to active Work Orders</div>
+            <div className="text-[11px] text-slate-400 mt-1">Committed to active Work Orders</div>
           </CardContent>
         </Card>
 
-        <Card className="border-indigo-200 bg-indigo-50/20 shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider block">
+            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
               Free Available Stock
             </span>
-            <div className="text-2xl font-bold text-indigo-700 font-mono mt-1">
+            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
               {summary.totalAvailable ? summary.totalAvailable.toLocaleString('en-IN') : '0.00'}
-              <span className="text-xs font-normal text-indigo-600 ml-1">kg</span>
+              <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-indigo-700 mt-1">Ready for new production</div>
+            <div className="text-[11px] text-slate-400 mt-1">Ready for new production</div>
           </CardContent>
         </Card>
       </div>
 
       {/* Main Tabs Navigation */}
       <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setActiveTab('materials')}
+          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'materials'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          Material-Wise Global Stock ({materialSummaries.length})
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveTab('balances')}
@@ -312,7 +368,7 @@ export default function GlobalStockDashboardPage() {
           }`}
         >
           <Boxes className="w-4 h-4" />
-          Material Balances ({pagination.total})
+          Warehouse Balances ({pagination.total})
         </button>
 
         <button
@@ -354,6 +410,165 @@ export default function GlobalStockDashboardPage() {
           Low Stock Alerts ({lowStockAlerts.length})
         </button>
       </div>
+
+      {/* Tab 0: Material-Wise Global Stock Aggregation */}
+      {activeTab === 'materials' && (
+        <Card className="border-t-0 rounded-t-none shadow-xs">
+          <CardHeader className="p-4 border-b border-slate-100 bg-slate-50/50">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Search Bar */}
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <Input
+                  placeholder="Search material name or code..."
+                  value={matSearch}
+                  onChange={(e) => setMatSearch(e.target.value)}
+                  className="pl-9 h-9 text-xs bg-white border-slate-200"
+                />
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Select value={matCategoryFilter} onValueChange={setMatCategoryFilter}>
+                  <SelectTrigger className="w-[180px] h-9 text-xs bg-white border-slate-200">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-xs">All Categories</SelectItem>
+                    <SelectItem value="RAW_MATERIAL" className="text-xs">Raw Material</SelectItem>
+                    <SelectItem value="CONDUCTOR" className="text-xs">Conductor</SelectItem>
+                    <SelectItem value="INSULATION" className="text-xs">Insulation</SelectItem>
+                    <SelectItem value="SHEATHING" className="text-xs">Sheathing</SelectItem>
+                    <SelectItem value="PACKING" className="text-xs">Packing Material</SelectItem>
+                    <SelectItem value="FINISHED_GOODS" className="text-xs">Finished Goods</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {(matSearch || matCategoryFilter !== 'ALL') && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setMatSearch('');
+                      setMatCategoryFilter('ALL');
+                    }}
+                    className="h-9 px-2 text-xs text-slate-500 hover:text-slate-900 cursor-pointer"
+                  >
+                    <FilterX className="w-3.5 h-3.5 mr-1" />
+                    Reset
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-slate-50/70 border-b border-slate-200">
+                  <TableRow>
+                    <TableHead className="text-xs font-semibold text-slate-700">Material Details</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700">Category</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700">Base Unit</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Global On-Hand</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Reserved in WIP</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Free Available</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700">Ownership Breakdown</TableHead>
+                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {isMaterialSummariesLoading ? (
+                    Array.from({ length: 6 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={8} className="py-4 text-center text-xs text-slate-400">
+                          Loading global material stocks...
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : filteredMaterialSummaries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-12 text-center text-slate-500 text-xs">
+                        No materials found matching your search.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredMaterialSummaries.map((item) => (
+                      <TableRow key={item._id} className="hover:bg-slate-50/60">
+                        <TableCell className="py-3">
+                          <div className="font-semibold text-xs text-slate-900">
+                            {item.material?.name || 'Material'}
+                          </div>
+                          <span className="font-mono text-[11px] text-slate-500">
+                            {item.material?.code}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="py-3 text-xs text-slate-600">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            {item.material?.category || 'RAW_MATERIAL'}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="py-3 text-xs font-mono font-medium text-slate-700">
+                          {item.material?.baseUnit || 'KG'}
+                        </TableCell>
+
+                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
+                          {item.totalOnHand?.toLocaleString('en-IN')}{' '}
+                          <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
+                        </TableCell>
+
+                        <TableCell className="py-3 text-right font-mono font-medium text-xs text-slate-900">
+                          {item.totalReserved > 0 ? (
+                            <span>
+                              {item.totalReserved?.toLocaleString('en-IN')}{' '}
+                              <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">0.00</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
+                          {item.totalAvailable?.toLocaleString('en-IN')}{' '}
+                          <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
+                        </TableCell>
+
+                        <TableCell className="py-3">
+                          <div className="flex flex-col gap-0.5 text-[11px]">
+                            <span className="text-slate-700">
+                              <span className="text-slate-500">Customer:</span>{' '}
+                              <span className="font-mono font-bold text-slate-900">{item.customerOnHand?.toLocaleString('en-IN') || '0'}</span>
+                            </span>
+                            <span className="text-slate-700">
+                              <span className="text-slate-500">Factory:</span>{' '}
+                              <span className="font-mono font-bold text-slate-900">{item.factoryOnHand?.toLocaleString('en-IN') || '0'}</span>
+                            </span>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="py-3 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedMaterialForStock(item)}
+                            className="h-8 px-2.5 text-xs font-medium gap-1 text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View Specifics
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tab 1: Material Balances Table */}
       {activeTab === 'balances' && (
@@ -415,7 +630,22 @@ export default function GlobalStockDashboardPage() {
                   </SelectContent>
                 </Select>
 
-                {(search || warehouseFilter !== 'ALL' || ownerFilter !== 'ALL' || customerFilter !== 'ALL') && (
+                {/* Material Filter */}
+                <Select value={materialFilter} onValueChange={setMaterialFilter}>
+                  <SelectTrigger className="w-[180px] h-9 text-xs bg-white border-slate-200">
+                    <SelectValue placeholder="All Materials" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-xs">All Materials</SelectItem>
+                    {materials.map((m) => (
+                      <SelectItem key={m._id} value={m._id} className="text-xs">
+                        {m.name} ({m.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {(search || warehouseFilter !== 'ALL' || ownerFilter !== 'ALL' || customerFilter !== 'ALL' || materialFilter !== 'ALL') && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -424,6 +654,7 @@ export default function GlobalStockDashboardPage() {
                       setWarehouseFilter('ALL');
                       setOwnerFilter('ALL');
                       setCustomerFilter('ALL');
+                      setMaterialFilter('ALL');
                     }}
                     className="h-9 px-2 text-xs text-slate-500 hover:text-slate-900 cursor-pointer"
                   >
@@ -505,14 +736,20 @@ export default function GlobalStockDashboardPage() {
                           <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
                         </TableCell>
 
-                        <TableCell className="py-3 text-right font-mono text-xs text-amber-600 font-medium">
-                          {b.quantityReserved?.toLocaleString('en-IN')}{' '}
-                          <span className="text-slate-400 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
+                        <TableCell className="py-3 text-right font-mono font-medium text-xs text-slate-900">
+                          {b.quantityReserved > 0 ? (
+                            <span>
+                              {b.quantityReserved?.toLocaleString('en-IN')}{' '}
+                              <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">0.00</span>
+                          )}
                         </TableCell>
 
-                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-emerald-700">
+                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
                           {b.quantityAvailable?.toLocaleString('en-IN')}{' '}
-                          <span className="text-emerald-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
+                          <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
                         </TableCell>
                       </TableRow>
                     ))
@@ -740,6 +977,15 @@ export default function GlobalStockDashboardPage() {
           customer={selectedCustomer}
           open={Boolean(selectedCustomer)}
           onOpenChange={(val) => !val && setSelectedCustomer(null)}
+        />
+      )}
+
+      {/* Specific Material Stock Details Slide-over Drawer */}
+      {selectedMaterialForStock && (
+        <MaterialStockDetailsDialog
+          material={selectedMaterialForStock}
+          open={Boolean(selectedMaterialForStock)}
+          onOpenChange={(val) => !val && setSelectedMaterialForStock(null)}
         />
       )}
     </div>

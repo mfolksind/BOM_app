@@ -252,12 +252,19 @@ export function ReceiveCustomerDrumsDialog({
                 <Label className="text-xs font-semibold text-slate-700">Sending Customer *</Label>
                 <Select value={customerId} onValueChange={setCustomerId}>
                   <SelectTrigger className="bg-white text-xs h-9">
-                    <SelectValue placeholder="Select Customer" />
+                    <SelectValue placeholder="Select Customer">
+                      {(() => {
+                        const c = (Array.isArray(localCustomers) ? localCustomers : []).find(
+                          (item) => String(item._id) === String(customerId),
+                        );
+                        return c ? `${c.name} (${c.code || 'CUST'})` : undefined;
+                      })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(Array.isArray(localCustomers) ? localCustomers : []).map((c) => (
                       <SelectItem key={c._id} value={c._id} className="text-xs">
-                        {c.name} ({c.code})
+                        {c.name} ({c.code || 'CUST'})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -292,12 +299,19 @@ export function ReceiveCustomerDrumsDialog({
                 <Label className="text-xs font-semibold text-slate-700">Receiving Warehouse / Yard *</Label>
                 <Select value={warehouseId} onValueChange={setWarehouseId}>
                   <SelectTrigger className="bg-white text-xs h-9">
-                    <SelectValue placeholder="Select Warehouse" />
+                    <SelectValue placeholder="Select Warehouse">
+                      {(() => {
+                        const w = (Array.isArray(localWarehouses) ? localWarehouses : []).find(
+                          (item) => String(item._id) === String(warehouseId),
+                        );
+                        return w ? `${w.name} (${w.code || 'WH'})` : undefined;
+                      })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(Array.isArray(localWarehouses) ? localWarehouses : []).map((w) => (
                       <SelectItem key={w._id} value={w._id} className="text-xs">
-                        {w.name} ({w.code})
+                        {w.name} ({w.code || 'WH'})
                       </SelectItem>
                     ))}
                   </SelectContent>

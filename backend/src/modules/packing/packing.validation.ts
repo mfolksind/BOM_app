@@ -94,7 +94,7 @@ export const updateDrumSchema = {
 export const listDrumsQuerySchema = {
   query: z.object({
     page: z.coerce.number().int().positive().default(1),
-    limit: z.coerce.number().int().positive().max(100).default(20),
+    limit: z.coerce.number().int().positive().max(1000).default(20),
     status: z.string().trim().optional(),
     drumType: z.string().trim().optional(),
     ownership: z.string().trim().optional(),
@@ -130,7 +130,7 @@ export const createPackingListSchema = {
     lines: z
       .array(
         z.object({
-          drumId: objectIdSchema,
+          drumId: objectIdSchema.optional().or(z.literal('')),
           sNo: z.number().optional(),
           drumNumber: z.string().trim().optional(),
           lengthBottom: z.number().min(0).default(0),
@@ -169,7 +169,7 @@ export const updatePackingListSchema = {
     lines: z
       .array(
         z.object({
-          drumId: objectIdSchema,
+          drumId: objectIdSchema.optional().or(z.literal('')),
           sNo: z.number().optional(),
           drumNumber: z.string().trim().optional(),
           lengthBottom: z.number().min(0).default(0),
@@ -196,7 +196,7 @@ export const updatePackingListSchema = {
 export const listPackingListsQuerySchema = {
   query: z.object({
     page: z.coerce.number().int().positive().default(1),
-    limit: z.coerce.number().int().positive().max(100).default(20),
+    limit: z.coerce.number().int().positive().max(1000).default(20),
     workOrderId: objectIdSchema.optional(),
     customerId: objectIdSchema.optional(),
     status: z.enum(['DRAFT', 'PACKED', 'COMPLETED', 'DISPATCHED', 'CANCELLED']).optional(),

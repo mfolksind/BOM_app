@@ -219,6 +219,74 @@ export class InventoryDashboardService {
   }
 
   /**
+   * Material-wise Global Stock Aggregation across all warehouses & owners
+   */
+  async getMaterialWiseGlobalStock(query?: { search?: string; category?: string }) {
+    const pipeline: mongoose.PipelineStage[] = [
+      {
+        $group: {
+          _id: '$materialId',
+          totalOnHand: { $sum: '$quantityOnHand' },
+          totalReserved: { $sum: '$quantityReserved' },
+          totalAvailable: { $sum: '$quantityAvailable' },
+          factoryOnHand: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'FACTORY'] }, '$quantityOnHand', 0] },
+          },
+          factoryReserved: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'FACTORY'] }, '$quantityReserved', 0] },
+          },
+          factoryAvailable: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'FACTORY'] }, '$quantityAvailable', 0] },
+          },
+          customerOnHand: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'CUSTOMER'] }, '$quantityOnHand', 0] },
+          },
+          customerReserved: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'CUSTOMER'] }, '$quantityReserved', 0] },
+          },
+          customerAvailable: {
+            $sum: { $cond: [{ $eq: ['$ownerType', 'CUSTOMER'] }, '$quantityAvailable', 0] },
+          },
+          entriesCount: { $sum: 1 },
+          warehouseIds: { $addToSet: '$warehouseId' },
+          customerIds: { $addToSet: '$customerId' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'materials',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'material',
+        },
+      },
+      { $unwind: '$material' },
+    ];
+
+    if (query?.category && query.category !== 'ALL') {
+      pipeline.push({
+        $match: { 'material.category': query.category },
+      });
+    }
+
+    if (query?.search && query.search.trim()) {
+      const regex = new RegExp(query.search.trim(), 'i');
+      pipeline.push({
+        $match: {
+          $or: [{ 'material.name': regex }, { 'material.code': regex }],
+        },
+      });
+    }
+
+    pipeline.push({
+      $sort: { 'material.name': 1 },
+    });
+
+    const items = await InventoryBalanceModel.aggregate(pipeline);
+    return items;
+  }
+
+  /**
    * Paginated Transaction Ledger with filters
    */
   async getTransactions(query: InventoryTransactionQueryParams) {

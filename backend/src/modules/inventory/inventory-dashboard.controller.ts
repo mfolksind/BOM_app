@@ -24,6 +24,12 @@ export class InventoryDashboardController {
     return ApiResponseUtil.success(res, result, 'Material stock details retrieved successfully');
   });
 
+  getMaterialWiseGlobalStock = asyncHandler(async (req: Request, res: Response) => {
+    const query = req.query as { search?: string; category?: string };
+    const result = await inventoryDashboardService.getMaterialWiseGlobalStock(query);
+    return ApiResponseUtil.success(res, result, 'Material-wise global stock retrieved successfully');
+  });
+
   getTransactions = asyncHandler(async (req: Request, res: Response) => {
     const query = req.query as unknown as InventoryTransactionQueryParams;
     const result = await inventoryDashboardService.getTransactions(query);

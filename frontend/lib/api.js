@@ -109,7 +109,7 @@ export async function apiClient(endpoint, options = {}) {
     res = await fetch(url, {
       ...rest,
       headers: reqHeaders,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
     });
   } catch (err) {
     throw new ApiError('Unable to connect to server. Ensure backend is running.', 0);
@@ -125,7 +125,7 @@ export async function apiClient(endpoint, options = {}) {
         return fetch(url, {
           ...rest,
           headers: reqHeaders,
-          body: body ? JSON.stringify(body) : undefined,
+          body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
         }).then(handleResponse);
       });
     }
@@ -149,7 +149,7 @@ export async function apiClient(endpoint, options = {}) {
         const retryRes = await fetch(url, {
           ...rest,
           headers: reqHeaders,
-          body: body ? JSON.stringify(body) : undefined,
+          body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
         });
         return handleResponse(retryRes);
       } else {

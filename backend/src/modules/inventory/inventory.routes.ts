@@ -19,6 +19,7 @@ router.get(
   inventoryDashboardController.getGlobalSummary,
 );
 
+router.get('/material-summary', inventoryDashboardController.getMaterialWiseGlobalStock);
 router.get('/materials/:materialId', inventoryDashboardController.getMaterialStock);
 
 router.get(

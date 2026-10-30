@@ -9,6 +9,8 @@ export interface IPackingList extends Document {
   workOrderDate?: Date;
   sizeDescription?: string;
   customerId: mongoose.Types.ObjectId;
+  inboundChallanId?: mongoose.Types.ObjectId;
+  inboundChallanNumber?: string;
   productId?: mongoose.Types.ObjectId;
   invoiceNumber?: string;
   challanNumber?: string;
@@ -60,6 +62,14 @@ const packingListSchema = new Schema<IPackingList>(
       type: Schema.Types.ObjectId,
       ref: 'Customer',
       required: [true, 'Customer reference is required'],
+    },
+    inboundChallanId: {
+      type: Schema.Types.ObjectId,
+      ref: 'InboundChallan',
+    },
+    inboundChallanNumber: {
+      type: String,
+      trim: true,
     },
     productId: {
       type: Schema.Types.ObjectId,

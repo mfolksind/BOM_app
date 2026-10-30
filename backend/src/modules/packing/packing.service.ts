@@ -830,8 +830,33 @@ export class PackingService {
       PackingListModel.countDocuments(query),
     ]);
 
+    const plIds = packingLists.map((p) => p._id);
+    const allLines = await PackingListLineModel.find({
+      packingListId: { $in: plIds },
+    })
+      .select('packingListId drumNumber sNo lengthTotal drumSize refRgpNumber drumType')
+      .sort({ sNo: 1 });
+
+    const linesByPl: Record<string, any[]> = {};
+    for (const l of allLines) {
+      const pid = l.packingListId.toString();
+      if (!linesByPl[pid]) linesByPl[pid] = [];
+      linesByPl[pid].push(l);
+    }
+
+    const enhancedPackingLists = packingLists.map((p) => {
+      const lines = linesByPl[p._id.toString()] || [];
+      const drumNumbers = lines.map((l) => l.drumNumber).filter(Boolean);
+      return {
+        ...p.toObject(),
+        totalDrums: p.totalDrums || lines.length,
+        lines,
+        drumNumbers,
+      };
+    });
+
     return {
-      packingLists,
+      packingLists: enhancedPackingLists,
       pagination: {
         page: filter.page,
         limit: filter.limit,

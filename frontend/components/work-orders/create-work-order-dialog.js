@@ -434,13 +434,13 @@ export function CreateWorkOrderDialog({
                             <TableCell className="text-right py-2">
                               {hasCustomer ? (
                                 <div>
-                                  <div className={`font-bold text-xs ${custAvail >= m.requiredQuantity ? 'text-emerald-700' : custAvail > 0 ? 'text-amber-600' : 'text-slate-500'}`}>
+                                  <div className="font-bold text-xs text-slate-900 font-mono">
                                     {custAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
                                   </div>
                                   <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
-                                    <span>On-Hand: <strong className="text-slate-700">{custOnHand.toFixed(1)}</strong></span>
+                                    <span>On-Hand: <strong className="text-slate-800">{custOnHand.toFixed(1)}</strong></span>
                                     <span>|</span>
-                                    <span>Frozen: <strong className={custFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{custFrozen.toFixed(1)}</strong></span>
+                                    <span>Frozen: <strong className="text-slate-800">{custFrozen.toFixed(1)}</strong></span>
                                   </div>
                                 </div>
                               ) : (
@@ -449,13 +449,13 @@ export function CreateWorkOrderDialog({
                             </TableCell>
                             <TableCell className="text-right py-2">
                               <div>
-                                <div className="font-bold text-xs text-slate-900">
+                                <div className="font-bold text-xs text-slate-900 font-mono">
                                   {globAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
                                 </div>
                                 <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
-                                  <span>On-Hand: <strong className="text-slate-700">{globOnHand.toFixed(1)}</strong></span>
+                                  <span>On-Hand: <strong className="text-slate-800">{globOnHand.toFixed(1)}</strong></span>
                                   <span>|</span>
-                                  <span>Frozen: <strong className={globFrozen > 0 ? 'text-blue-700 font-bold' : 'text-slate-500'}>{globFrozen.toFixed(1)}</strong></span>
+                                  <span>Frozen: <strong className="text-slate-800">{globFrozen.toFixed(1)}</strong></span>
                                 </div>
                               </div>
                             </TableCell>

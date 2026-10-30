@@ -36,6 +36,8 @@ export interface IBomSnapshot {
 export interface IWorkOrder extends Document {
   workOrderNumber: string;
   customerId: mongoose.Types.ObjectId;
+  inboundChallanId?: mongoose.Types.ObjectId;
+  inboundChallanNumber?: string;
   customerPoNumber?: string;
   customerPoDate?: Date;
   productId: mongoose.Types.ObjectId;
@@ -110,6 +112,14 @@ const workOrderSchema = new Schema<IWorkOrder>(
       type: Schema.Types.ObjectId,
       ref: 'Customer',
       required: [true, 'Customer reference is required'],
+    },
+    inboundChallanId: {
+      type: Schema.Types.ObjectId,
+      ref: 'InboundChallan',
+    },
+    inboundChallanNumber: {
+      type: String,
+      trim: true,
     },
     customerPoNumber: {
       type: String,
@@ -235,6 +245,7 @@ const workOrderSchema = new Schema<IWorkOrder>(
 );
 
 workOrderSchema.index({ customerId: 1, status: 1 });
+workOrderSchema.index({ inboundChallanId: 1 });
 workOrderSchema.index({ productId: 1 });
 workOrderSchema.index({ targetDeliveryDate: 1 });
 workOrderSchema.index({ status: 1 });

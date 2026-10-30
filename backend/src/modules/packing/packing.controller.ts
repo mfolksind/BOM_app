@@ -24,6 +24,8 @@ export class PackingController {
       const currentProductId = req.query.currentProductId as string | undefined;
       const workOrderId = req.query.workOrderId as string | undefined;
       const customerId = req.query.customerId as string | undefined;
+      const inboundChallanId = req.query.inboundChallanId as string | undefined;
+      const refRgpNumber = req.query.refRgpNumber as string | undefined;
       const currentWarehouseId = req.query.currentWarehouseId as string | undefined;
       const search = req.query.search as string | undefined;
 
@@ -35,6 +37,8 @@ export class PackingController {
         currentProductId,
         workOrderId,
         customerId,
+        inboundChallanId,
+        refRgpNumber,
         currentWarehouseId,
         search,
       });

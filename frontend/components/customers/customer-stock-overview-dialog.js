@@ -145,7 +145,7 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
           {/* KPI Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4">
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Total RM Stock
               </span>
               <div className="text-xl font-bold text-slate-900 font-mono">
@@ -155,61 +155,61 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
               <span className="text-[10px] text-slate-400 mt-1 block">Customer Owned</span>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-xs">
-              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block mb-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Available Free
               </span>
-              <div className="text-xl font-bold text-emerald-700 font-mono">
+              <div className="text-xl font-bold text-slate-900 font-mono">
                 {summary.totalAvailableKg ? summary.totalAvailableKg.toLocaleString('en-IN') : '0.00'}
-                <span className="text-xs font-normal text-emerald-600 ml-1">kg</span>
+                <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
               </div>
-              <span className="text-[10px] text-emerald-600 mt-1 block">Ready for production</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Ready for production</span>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-amber-200 bg-amber-50/20 shadow-xs">
-              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block mb-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Reserved in POs
               </span>
-              <div className="text-xl font-bold text-amber-700 font-mono">
+              <div className="text-xl font-bold text-slate-900 font-mono">
                 {summary.totalReservedKg ? summary.totalReservedKg.toLocaleString('en-IN') : '0.00'}
-                <span className="text-xs font-normal text-amber-600 ml-1">kg</span>
+                <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
               </div>
-              <span className="text-[10px] text-amber-600 mt-1 block">Locked in WIP</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Locked in WIP</span>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-rose-200 bg-rose-50/20 shadow-xs">
-              <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block mb-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Process Scrap
               </span>
-              <div className="text-xl font-bold text-rose-700 font-mono">
+              <div className="text-xl font-bold text-slate-900 font-mono">
                 {summary.totalScrapKg ? summary.totalScrapKg.toLocaleString('en-IN') : '0.00'}
-                <span className="text-xs font-normal text-rose-600 ml-1">kg</span>
+                <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
               </div>
-              <span className="text-[10px] text-rose-600 mt-1 block">Party Process Loss</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Party Process Loss</span>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-xs">
-              <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block mb-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Empty Drums
               </span>
-              <div className="text-xl font-bold text-indigo-700 font-mono">
+              <div className="text-xl font-bold text-slate-900 font-mono">
                 {drumSummary.availableEmpty || 0}
                 <span className="text-xs font-normal text-slate-500 ml-1">
                   / {drumSummary.totalReceived || 0}
                 </span>
               </div>
-              <span className="text-[10px] text-indigo-600 mt-1 block">In plant yard</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">In plant yard</span>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-purple-200 bg-purple-50/20 shadow-xs">
-              <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider block mb-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
                 Packed Drums
               </span>
-              <div className="text-xl font-bold text-purple-700 font-mono">
+              <div className="text-xl font-bold text-slate-900 font-mono">
                 {drumSummary.packed || 0}
-                <span className="text-xs font-normal text-purple-600 ml-1">drums</span>
+                <span className="text-xs font-normal text-slate-500 ml-1">drums</span>
               </div>
-              <span className="text-[10px] text-purple-600 mt-1 block">Ready for dispatch</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Ready for dispatch</span>
             </div>
           </div>
 
@@ -331,10 +331,10 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
                         <TableCell className="py-2.5 text-right font-mono font-semibold text-xs text-slate-900">
                           {item.quantityOnHand?.toLocaleString('en-IN')} {item.materialId?.baseUnit || 'KG'}
                         </TableCell>
-                        <TableCell className="py-2.5 text-right font-mono text-xs text-amber-600">
+                        <TableCell className="py-2.5 text-right font-mono font-medium text-xs text-slate-900">
                           {item.quantityReserved?.toLocaleString('en-IN')} {item.materialId?.baseUnit || 'KG'}
                         </TableCell>
-                        <TableCell className="py-2.5 text-right font-mono font-bold text-xs text-emerald-700">
+                        <TableCell className="py-2.5 text-right font-mono font-bold text-xs text-slate-900">
                           {item.quantityAvailable?.toLocaleString('en-IN')} {item.materialId?.baseUnit || 'KG'}
                         </TableCell>
                       </TableRow>
@@ -383,7 +383,7 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
                             ? `${drum.flangeDiameterMm}x${drum.barrelDiameterMm}x${drum.traverseWidthMm}`
                             : drum.sizeDescription || '44X16X24'}
                         </TableCell>
-                        <TableCell className="py-2.5 font-mono text-xs text-indigo-700 font-medium">
+                        <TableCell className="py-2.5 font-mono text-xs text-slate-800 font-medium">
                           {drum.refRgpNumber || '—'}
                         </TableCell>
                         <TableCell className="py-2.5 font-mono text-xs text-slate-600">
@@ -549,7 +549,7 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
                             PL: {oc.packingListId?.packingListNumber || '—'}
                           </div>
                         </TableCell>
-                        <TableCell className="py-2.5 text-right font-mono font-bold text-xs text-indigo-700">
+                        <TableCell className="py-2.5 text-right font-mono font-bold text-xs text-slate-900">
                           {oc.totalLengthMeters?.toLocaleString('en-IN') || '—'} m
                         </TableCell>
                         <TableCell className="py-2.5 text-xs text-slate-600">
@@ -674,7 +674,7 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
                               <div className="font-semibold text-xs text-slate-900">{m.materialName}</div>
                               <div className="text-[11px] text-slate-400 font-mono">{m.materialCode}</div>
                             </TableCell>
-                            <TableCell className="text-right font-mono font-bold text-xs text-rose-700">
+                            <TableCell className="text-right font-mono font-bold text-xs text-slate-900">
                               {m.totalKg?.toFixed(2)}
                             </TableCell>
                             <TableCell className="text-right text-xs font-medium text-slate-600">
@@ -719,13 +719,13 @@ export function CustomerStockOverviewDialog({ customer, open, onOpenChange }) {
                             <TableCell className="font-mono text-xs font-semibold text-slate-800">
                               {s.scrapNumber}
                             </TableCell>
-                            <TableCell className="font-mono text-xs text-indigo-700 font-medium">
+                            <TableCell className="font-mono text-xs text-slate-800 font-medium">
                               {s.workOrderId?.workOrderNumber || '—'}
                             </TableCell>
                             <TableCell className="text-xs text-slate-800">
                               {s.materialId?.name || 'Material'}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs font-bold text-rose-700">
+                            <TableCell className="text-right font-mono text-xs font-bold text-slate-900">
                               {s.scrapQuantity} {s.unit}
                             </TableCell>
                             <TableCell className="text-xs text-slate-600">
