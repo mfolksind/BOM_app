@@ -953,6 +953,7 @@ export class DispatchService {
       materialName: string;
       hsn: string;
       normPerMeter: number;
+      scrapPercentage: number;
       standardCost: number;
     }
 
@@ -976,7 +977,11 @@ export class DispatchService {
       }
 
       // Include scrap tolerance / scrap factor in total quantity used per meter
-      const scrapPct = Number(b.scrapTolerancePercentage || mat?.scrapTolerancePercentage || 0);
+      let scrapPct = Number(b.scrapTolerancePercentage || mat?.scrapTolerancePercentage || 0);
+      if (scrapPct <= 0) {
+        // Typical cable manufacturing industry scrap default (2% to 3% job work scrap)
+        scrapPct = 2.5;
+      }
       if (scrapPct > 0) {
         norm = Number((norm * (1 + scrapPct / 100)).toFixed(6));
       }
@@ -990,6 +995,7 @@ export class DispatchService {
           materialName: matName,
           hsn,
           normPerMeter: norm,
+          scrapPercentage: scrapPct,
           standardCost: cost,
         });
       }
@@ -1018,11 +1024,14 @@ export class DispatchService {
           } else if (lower.includes('master') || lower.includes('batch') || lower.includes('color')) {
             norm = 0.00049;
           }
+          const defaultScrapPct = 2.5;
+          norm = Number((norm * (1 + defaultScrapPct / 100)).toFixed(6));
           materialDemands.push({
             materialId: matId,
             materialName: matName,
             hsn,
             normPerMeter: norm,
+            scrapPercentage: defaultScrapPct,
             standardCost: cost,
           });
         }
@@ -1129,11 +1138,17 @@ export class DispatchService {
             continue;
           }
 
+          // Calculate scrap portion of this advice's usage: scrap = totalUsed * (scrapPct / (100 + scrapPct))
+          const sPct = demand.scrapPercentage || 2.5;
+          const scrapQtyFromThis = Number((thisAdviceInThis * (sPct / (100 + sPct))).toFixed(2));
+
           columns.push({
             challanRef: entry.challanRef,
             description: entry.materialName,
             hsn: entry.hsn,
             unitRate: rate,
+            scrapPercentage: sPct,
+            scrapQuantity: scrapQtyFromThis,
             originallyReceived: { qty: origQty, value: origVal },
             processingLoss: { qty: 0, value: 0 },
             netQuantity: { qty: origQty, value: origVal },
@@ -1227,7 +1242,11 @@ export class DispatchService {
 
     const dispatchIds = dispatches.map((d) => d._id);
     const challans = await OutboundChallanModel.find({ dispatchId: { $in: dispatchIds } });
-    const challanMap = new Map(challans.map((c) => [c.dispatchId.toString(), c]));
+    const challanMap = new Map(
+      challans
+        .filter((c) => c.dispatchId)
+        .map((c) => [c.dispatchId!.toString(), c]),
+    );
 
     const history = await Promise.all(
       dispatches.map(async (d) => {
@@ -1333,7 +1352,11 @@ export class DispatchService {
 
     const dispatchIds = dispatches.map((d) => d._id);
     const challans = await OutboundChallanModel.find({ dispatchId: { $in: dispatchIds } });
-    const challanMap = new Map(challans.map((c) => [c.dispatchId.toString(), c]));
+    const challanMap = new Map(
+      challans
+        .filter((c) => c.dispatchId)
+        .map((c) => [c.dispatchId!.toString(), c]),
+    );
 
     const fulfillmentPercentage =
       workOrder.orderedLengthMeters > 0

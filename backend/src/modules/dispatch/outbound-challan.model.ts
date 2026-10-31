@@ -49,6 +49,7 @@ export interface IOutboundChallan extends Document {
   status: OutboundChallanStatus;
   issuedBy?: mongoose.Types.ObjectId;
   acknowledgedByCustomer: boolean;
+  acknowledgedDate?: Date;
   consumptionSheet?: Record<string, any>;
   remarks?: string;
   createdAt: Date;

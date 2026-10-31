@@ -51,21 +51,20 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
 
                 let returnQty = 0;
                 if (returning) {
-                    // If returning scrap, return quantity defaults to processing loss / scrap quantity if any,
-                    // or scrap portion of this advice (e.g. 2% or designated scrap), else available positive balance
-                    const scrapPct = col.scrapPercentage || 0;
-                    if (scrapPct > 0) {
-                        returnQty = Number((thisAdviceQty * (scrapPct / 100)).toFixed(2));
-                    } else if (col.processingLoss?.qty > 0) {
-                        returnQty = col.processingLoss.qty;
+                    if (Number(col.scrapQuantity || 0) > 0) {
+                        returnQty = Number(col.scrapQuantity);
                     } else {
-                        // Default to 0 unless specified or previous returnQty
-                        returnQty = col.qtyReturn?.qty || 0;
+                        // scrap percentage calculation from total used quantity (gross = net * (1 + scrapPct/100))
+                        const scrapPct = Number(col.scrapPercentage || 2.5);
+                        returnQty = Number((thisAdviceQty * (scrapPct / (100 + scrapPct))).toFixed(2));
                     }
                 }
 
                 const returnVal = Number((returnQty * rate).toFixed(2));
-                const balQty = Number((netQty - earlierQty - thisAdviceQty - returnQty).toFixed(2));
+                // Balance in hand is the remaining unused raw material in parent factory's challan:
+                // Net Quantity - Earlier Used - This Advice.
+                // Qty Return represents the scrap generated from this advice returned back to the customer.
+                const balQty = Number((netQty - earlierQty - thisAdviceQty).toFixed(2));
                 const balVal = Number((balQty * rate).toFixed(2));
 
                 return {
@@ -150,12 +149,13 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
             const netVal = Number((netQty * rate).toFixed(2));
             col.netQuantity = { qty: netQty, value: netVal };
 
-            // Balance In Hand = Net Quantity - Earlier Used - This Advice - Return Qty (allows negative if over-consumed)
+            // Balance In Hand = Net Quantity - Earlier Used - This Advice (allows negative if over-consumed)
+            // (Note: This Advice already accounts for the total material consumed including scrap, so returnQty must NOT be deducted again)
             const earlierQty = col.qtyUsedEarlier?.qty || 0;
             const thisAdviceQty = col.qtyUsedThisAdvice?.qty || 0;
-            const returnQty = isReturningScrap ? (col.qtyReturn?.qty || 0) : 0;
+            const returnQty = col.qtyReturn?.qty || 0;
 
-            const balQty = Number((netQty - earlierQty - thisAdviceQty - returnQty).toFixed(2));
+            const balQty = Number((netQty - earlierQty - thisAdviceQty).toFixed(2));
             const balVal = Number((balQty * rate).toFixed(2));
             col.balanceInHand = { qty: balQty, value: balVal };
 
