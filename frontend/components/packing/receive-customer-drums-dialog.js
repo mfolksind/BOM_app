@@ -24,12 +24,33 @@ import { api } from '@/lib/api';
 
 const STANDARD_DRUM_SIZES = [
   '44X16X24',
-  '1400X700X900',
+  '44X22X20',
+  '46X22X20',
+  '48X20X28',
+  '48X24X24',
+  '48X28X24',
+  '36X18X20',
+  '36X22X18',
+  '40X20X20',
+  '40X22X20',
+  '52X26X28',
+  '52X28X24',
+  '56X28X24',
+  '56X30X30',
+  '60X28X28',
+  '60X32X32',
+  '64X34X34',
+  '68X34X34',
+  '72X34X34',
+  '72X38X36',
+  '80X40X40',
+  '90X48X48',
+  '1000X500X600',
   '1200X600X800',
+  '1400X700X900',
   '1600X800X1000',
   '1800X900X1100',
   '2000X1000X1200',
-  '1000X500X600',
 ];
 
 export function ReceiveCustomerDrumsDialog({
@@ -53,6 +74,8 @@ export function ReceiveCustomerDrumsDialog({
 
   // 2 Core Drum Fields as requested
   const [drumSize, setDrumSize] = useState('44X16X24');
+  const [availableSizes, setAvailableSizes] = useState(STANDARD_DRUM_SIZES);
+  const [isCustomSize, setIsCustomSize] = useState(false);
   const [numberOfDrums, setNumberOfDrums] = useState('4');
   const [drumPrefix, setDrumPrefix] = useState('MF/');
   const [drumType, setDrumType] = useState('WOODEN');
@@ -80,12 +103,22 @@ export function ReceiveCustomerDrumsDialog({
 
   const fetchMasters = async () => {
     try {
-      const [cRes, whRes] = await Promise.all([
+      const [cRes, whRes, drumsRes] = await Promise.all([
         api.get('/customers?limit=100'),
         api.get('/warehouses?limit=100'),
+        api.get('/drums?limit=200').catch(() => null),
       ]);
       const custList = Array.isArray(cRes?.data) ? cRes.data : (cRes?.data?.items || cRes?.data?.customers || []);
       const whList = Array.isArray(whRes?.data) ? whRes.data : (whRes?.data?.items || whRes?.data?.warehouses || []);
+
+      if (drumsRes?.data) {
+        const dList = Array.isArray(drumsRes.data) ? drumsRes.data : (drumsRes.data?.drums || []);
+        const dbSizes = dList
+          .map((d) => d.drumSize?.trim())
+          .filter(Boolean);
+        const merged = Array.from(new Set([...STANDARD_DRUM_SIZES, ...dbSizes]));
+        setAvailableSizes(merged);
+      }
 
       if (custList.length > 0) {
         setLocalCustomers(custList);
@@ -330,22 +363,20 @@ export function ReceiveCustomerDrumsDialog({
                   <button
                     type="button"
                     onClick={() => setEntryMode('quick')}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors ${
-                      entryMode === 'quick'
-                        ? 'bg-orange-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                    className={`px-2.5 py-1 rounded font-medium transition-colors ${entryMode === 'quick'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                      }`}
                   >
                     Quick (2-Field Entry)
                   </button>
                   <button
                     type="button"
                     onClick={() => setEntryMode('detailed')}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors ${
-                      entryMode === 'detailed'
-                        ? 'bg-orange-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                    className={`px-2.5 py-1 rounded font-medium transition-colors ${entryMode === 'detailed'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                      }`}
                   >
                     Individual Drum Serials
                   </button>
@@ -355,34 +386,61 @@ export function ReceiveCustomerDrumsDialog({
               {entryMode === 'quick' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-slate-800">
-                      1. Size of Drums (Flange x Core x Trav) *
-                    </Label>
-                    <div className="space-y-1.5">
-                      <Input
-                        value={drumSize}
-                        onChange={(e) => setDrumSize(e.target.value)}
-                        placeholder="e.g. 44X16X24 or 1400X700X900"
-                        className="bg-white text-xs h-9 font-mono font-bold"
-                        required
-                      />
-                      <div className="flex flex-wrap gap-1">
-                        {STANDARD_DRUM_SIZES.slice(0, 4).map((sz) => (
-                          <button
-                            key={sz}
-                            type="button"
-                            onClick={() => setDrumSize(sz)}
-                            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                              drumSize === sz
-                                ? 'bg-orange-600 text-white border-orange-600'
-                                : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
-                            }`}
-                          >
-                            {sz}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-slate-800">
+                        1. Size of Drums (Flange x Core x Trav) *
+                      </Label>
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomSize((prev) => !prev)}
+                        className="text-[11px] font-medium text-orange-600 hover:text-orange-700 underline cursor-pointer"
+                      >
+                        {isCustomSize ? 'Choose from dropdown list' : '+ Enter custom size'}
+                      </button>
                     </div>
+
+                    {!isCustomSize ? (
+                      <Select
+                        value={drumSize}
+                        onValueChange={(val) => {
+                          if (val === '__CUSTOM__') {
+                            setIsCustomSize(true);
+                          } else {
+                            setDrumSize(val);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-white text-xs h-9 font-mono font-bold border-slate-200">
+                          <SelectValue placeholder="Select Drum Size">
+                            {drumSize || 'Select Drum Size'}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {availableSizes.map((sz) => (
+                            <SelectItem key={sz} value={sz} className="text-xs font-mono font-medium">
+                              {sz}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__CUSTOM__" className="text-xs font-semibold text-orange-600">
+                            + Enter Custom Drum Size...
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="space-y-1">
+                        <Input
+                          value={drumSize}
+                          onChange={(e) => setDrumSize(e.target.value)}
+                          placeholder="e.g. 44X16X24 or 1400X700X900"
+                          className="bg-white text-xs h-9 font-mono font-bold border-orange-300 focus-visible:ring-orange-400"
+                          required
+                          autoFocus
+                        />
+                        <p className="text-[10px] text-slate-500">
+                          Enter dimensions in inches (e.g. 44X16X24) or mm (e.g. 1400X700X900).
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
@@ -479,12 +537,24 @@ export function ReceiveCustomerDrumsDialog({
                                 required
                               />
                             </td>
-                            <td className="p-1.5">
-                              <Input
+                            <td className="p-1.5 w-36">
+                              <Select
                                 value={row.drumSize}
-                                onChange={(e) => handleRowChange(idx, 'drumSize', e.target.value)}
-                                className="h-7 text-xs font-mono"
-                              />
+                                onValueChange={(val) => handleRowChange(idx, 'drumSize', val)}
+                              >
+                                <SelectTrigger className="h-7 text-xs bg-white font-mono border-slate-200">
+                                  <SelectValue placeholder="Size">
+                                    {row.drumSize || 'Size'}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent className="max-h-56">
+                                  {Array.from(new Set([...availableSizes, row.drumSize].filter(Boolean))).map((sz) => (
+                                    <SelectItem key={sz} value={sz} className="text-xs font-mono">
+                                      {sz}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </td>
                             <td className="p-1.5">
                               <Select
