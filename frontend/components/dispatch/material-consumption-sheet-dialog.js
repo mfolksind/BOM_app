@@ -1061,76 +1061,94 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                                 </div>
                             </div>
 
-                            {/* Bottom Calculation Breakdown Table matching Image 2 */}
-                            <div className="mt-6 pt-4 border-t border-slate-300">
-                                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                                    Earlier Advices Reconciliation Breakdown (Sums to Row 13)
-                                </p>
-                                <div className="overflow-x-auto">
-                                    <table className="border-collapse border border-slate-400 text-[9.5px] font-mono ml-auto">
-                                        <tbody>
-                                            {/* Advice 1 Breakdown */}
-                                            <tr className="bg-slate-50">
-                                                <td className="border border-slate-400 px-2 py-0.5 text-left font-sans font-semibold text-slate-700">
-                                                    Prior Advice 1 (Qty | Value)
-                                                </td>
-                                                {columns?.map((c, i) => {
-                                                    const b1 = c.earlierBreakdown?.[0];
-                                                    const q1 = b1 ? b1.qty : Number(((c.qtyUsedEarlier?.qty || 0) * 0.9).toFixed(2));
-                                                    const v1 = b1 ? b1.value : Number(((c.qtyUsedEarlier?.value || 0) * 0.9).toFixed(2));
-                                                    return (
-                                                        <React.Fragment key={i}>
-                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
-                                                                {q1.toFixed(2)}
-                                                            </td>
-                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
-                                                                {v1.toFixed(2)}
-                                                            </td>
-                                                        </React.Fragment>
-                                                    );
-                                                })}
-                                            </tr>
-                                            {/* Advice 2 Breakdown */}
-                                            <tr className="bg-slate-50">
-                                                <td className="border border-slate-400 px-2 py-0.5 text-left font-sans font-semibold text-slate-700">
-                                                    Prior Advice 2 (Qty | Value)
-                                                </td>
-                                                {columns?.map((c, i) => {
-                                                    const b2 = c.earlierBreakdown?.[1];
-                                                    const q2 = b2 ? b2.qty : Number(((c.qtyUsedEarlier?.qty || 0) * 0.1).toFixed(2));
-                                                    const v2 = b2 ? b2.value : Number(((c.qtyUsedEarlier?.value || 0) * 0.1).toFixed(2));
-                                                    return (
-                                                        <React.Fragment key={i}>
-                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
-                                                                {q2.toFixed(2)}
-                                                            </td>
-                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
-                                                                {v2.toFixed(2)}
-                                                            </td>
-                                                        </React.Fragment>
-                                                    );
-                                                })}
-                                            </tr>
-                                            {/* Total Sum matching Row 13 */}
-                                            <tr className="bg-slate-200/80 font-bold border-t border-slate-500">
-                                                <td className="border border-slate-400 px-2 py-0.5 text-left font-sans font-bold text-slate-900">
-                                                    Total Earlier Used (Row 13)
-                                                </td>
-                                                {columns?.map((c, i) => (
-                                                    <React.Fragment key={i}>
-                                                        <td className="border border-slate-400 px-2 py-0.5 text-right font-bold text-slate-900">
-                                                            {Number(c.qtyUsedEarlier?.qty || 0).toFixed(2)}
+                            {/* Bottom Calculation Breakdown Table matching Image 2 (Dynamic: only displayed if earlier advices exist) */}
+                            {(() => {
+                                const hasEarlierAdvices = columns?.some(
+                                    (c) => Number(c.qtyUsedEarlier?.qty || 0) > 0 || (c.earlierBreakdown && c.earlierBreakdown.length > 0)
+                                );
+                                if (!hasEarlierAdvices) return null;
+
+                                // Collect unique prior advice labels or indices
+                                const maxBreakdowns = Math.max(
+                                    ...columns.map((c) => (c.earlierBreakdown ? c.earlierBreakdown.length : 0)),
+                                    1
+                                );
+                                const adviceIndices = Array.from({ length: maxBreakdowns }, (_, idx) => idx);
+
+                                return (
+                                    <div className="mt-6 pt-4 border-t border-slate-300">
+                                        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                            Earlier Advices Reconciliation Breakdown (Sums to Row 13)
+                                        </p>
+                                        <div className="overflow-x-auto">
+                                            <table className="border-collapse border border-slate-400 text-[9.5px] font-mono ml-auto">
+                                                <tbody>
+                                                    {adviceIndices.map((adviceIdx) => {
+                                                        // Determine title from first column with this breakdown entry or fallback
+                                                        const firstNamed = columns?.find((c) => c.earlierBreakdown?.[adviceIdx]?.label);
+                                                        const rowTitle = firstNamed?.earlierBreakdown?.[adviceIdx]?.label
+                                                            ? `Advice ${firstNamed.earlierBreakdown[adviceIdx].label}`
+                                                            : `Prior Advice ${adviceIdx + 1} (Qty | Value)`;
+
+                                                        return (
+                                                            <tr key={adviceIdx} className="bg-slate-50">
+                                                                <td className="border border-slate-400 px-2 py-0.5 text-left font-sans font-semibold text-slate-700 whitespace-nowrap">
+                                                                    {rowTitle}
+                                                                </td>
+                                                                {columns?.map((c, i) => {
+                                                                    const b = c.earlierBreakdown?.[adviceIdx];
+                                                                    const totalEarlier = Number(c.qtyUsedEarlier?.qty || 0);
+                                                                    const totalEarlierVal = Number(c.qtyUsedEarlier?.value || 0);
+                                                                    
+                                                                    // If backend breakdown exists, use it; otherwise single advice holds total
+                                                                    const q = b
+                                                                        ? b.qty
+                                                                        : maxBreakdowns === 1
+                                                                        ? totalEarlier
+                                                                        : 0;
+                                                                    const v = b
+                                                                        ? b.value
+                                                                        : maxBreakdowns === 1
+                                                                        ? totalEarlierVal
+                                                                        : 0;
+
+                                                                    return (
+                                                                        <React.Fragment key={i}>
+                                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
+                                                                                {Number(q || 0).toFixed(2)}
+                                                                            </td>
+                                                                            <td className="border border-slate-400 px-2 py-0.5 text-right">
+                                                                                {Number(v || 0).toFixed(2)}
+                                                                            </td>
+                                                                        </React.Fragment>
+                                                                    );
+                                                                })}
+                                                            </tr>
+                                                        );
+                                                    })}
+
+                                                    {/* Total Sum matching Row 13 */}
+                                                    <tr className="bg-slate-200/80 font-bold border-t border-slate-500">
+                                                        <td className="border border-slate-400 px-2 py-0.5 text-left font-sans font-bold text-slate-900">
+                                                            Total Earlier Used (Row 13)
                                                         </td>
-                                                        <td className="border border-slate-400 px-2 py-0.5 text-right font-bold text-slate-900">
-                                                            {Number(c.qtyUsedEarlier?.value || 0).toFixed(2)}
-                                                        </td>
-                                                    </React.Fragment>
-                                                ))}
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
+                                                        {columns?.map((c, i) => (
+                                                            <React.Fragment key={i}>
+                                                                <td className="border border-slate-400 px-2 py-0.5 text-right font-bold text-slate-900">
+                                                                    {Number(c.qtyUsedEarlier?.qty || 0).toFixed(2)}
+                                                                </td>
+                                                                <td className="border border-slate-400 px-2 py-0.5 text-right font-bold text-slate-900">
+                                                                    {Number(c.qtyUsedEarlier?.value || 0).toFixed(2)}
+                                                                </td>
+                                                            </React.Fragment>
+                                                        ))}
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 )}

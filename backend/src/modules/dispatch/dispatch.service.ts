@@ -928,7 +928,7 @@ export class DispatchService {
       customerId: customer?._id,
       createdAt: { $lt: challan.createdAt },
       status: { $ne: 'CANCELLED' },
-    });
+    }).sort({ createdAt: 1 });
     const previousDispatchedLength = previousChallans.reduce(
       (sum, c) => sum + (c.totalLengthMeters || 0),
       0,
@@ -1077,6 +1077,14 @@ export class DispatchService {
         let totalPriorDemand = Number((previousDispatchedLength * demand.normPerMeter).toFixed(2));
         let totalCurrentDemand = Number((currentDispatchLength * demand.normPerMeter).toFixed(2));
 
+        // Track how earlier demand breaks down per prior advice
+        const priorAdviceDemands = previousChallans.map((pc, idx) => ({
+          adviceIndex: idx + 1,
+          challanNumber: pc.challanNumber || `Prior Advice ${idx + 1}`,
+          challanDate: formatDate(pc.challanDate || pc.createdAt),
+          demandRemaining: Number(((pc.totalLengthMeters || 0) * demand.normPerMeter).toFixed(2)),
+        }));
+
         for (let i = 0; i < matchingChallanEntries.length; i++) {
           const entry = matchingChallanEntries[i];
           const isLastChallan = i === matchingChallanEntries.length - 1;
@@ -1086,6 +1094,8 @@ export class DispatchService {
 
           // 1. Deduct prior usage from this challan
           let earlierUsedInThis = 0;
+          const earlierBreakdown: { label: string; qty: number; value: number }[] = [];
+
           if (totalPriorDemand > 0) {
             if (isLastChallan) {
               // If it's the last available challan, it absorbs any remaining prior demand even if it exceeds origQty
@@ -1094,6 +1104,22 @@ export class DispatchService {
             } else {
               earlierUsedInThis = Math.min(origQty, totalPriorDemand);
               totalPriorDemand = Number((totalPriorDemand - earlierUsedInThis).toFixed(2));
+            }
+
+            // Distribute earlierUsedInThis across prior dispatches sequentially
+            let remainingToAllocate = earlierUsedInThis;
+            for (const pad of priorAdviceDemands) {
+              if (remainingToAllocate <= 0) break;
+              if (pad.demandRemaining > 0) {
+                const take = Math.min(pad.demandRemaining, remainingToAllocate);
+                pad.demandRemaining = Number((pad.demandRemaining - take).toFixed(2));
+                remainingToAllocate = Number((remainingToAllocate - take).toFixed(2));
+                earlierBreakdown.push({
+                  label: `${pad.challanNumber}${pad.challanDate ? ` (${pad.challanDate})` : ''}`,
+                  qty: Number(take.toFixed(2)),
+                  value: Number((take * rate).toFixed(2)),
+                });
+              }
             }
           }
           earlierUsedInThis = Number(earlierUsedInThis.toFixed(2));
@@ -1153,6 +1179,7 @@ export class DispatchService {
             processingLoss: { qty: 0, value: 0 },
             netQuantity: { qty: origQty, value: origVal },
             qtyUsedEarlier: { qty: earlierUsedInThis, value: earlierVal },
+            earlierBreakdown: earlierBreakdown.length > 0 ? earlierBreakdown : undefined,
             qtyUsedThisAdvice: { qty: thisAdviceInThis, value: thisAdviceVal },
             balanceInHand: { qty: balanceQty, value: balanceVal },
             qtyReturn: { qty: 0, value: 0 },
