@@ -901,8 +901,25 @@ export class DispatchService {
 
     // Retrieve BOM if work order has bomVersionId
     let bomItems: any[] = [];
-    if (workOrder?.bomVersionId) {
-      bomItems = await BomItemModel.find({ bomVersionId: workOrder.bomVersionId }).populate('materialId');
+    let bomBatchSize = 1000; // Standard default batchSize in meters (e.g. 1000 meters)
+
+    if (workOrder?.bomSnapshot?.items?.length) {
+      bomBatchSize = workOrder.bomSnapshot.batchSize || 1000;
+      bomItems = workOrder.bomSnapshot.items.map((item: any) => ({
+        materialId: item.materialId,
+        quantityPerUnit: item.quantityPerUnit,
+        materialName: item.materialName,
+        materialCode: item.materialCode,
+      }));
+    } else if (workOrder?.bomVersionId) {
+      const [dbBomItems, dbBomVersion] = await Promise.all([
+        BomItemModel.find({ bomVersionId: workOrder.bomVersionId }).populate('materialId'),
+        BomVersionModel.findById(workOrder.bomVersionId),
+      ]);
+      bomItems = dbBomItems;
+      if (dbBomVersion?.batchSize) {
+        bomBatchSize = dbBomVersion.batchSize;
+      }
     }
 
     // Find previous outbound challans for this customer to calculate earlier usage
@@ -916,120 +933,198 @@ export class DispatchService {
       0,
     );
 
-    const currentDispatchLength = challan.totalLengthMeters || 1997;
+    const currentDispatchLength = challan.totalLengthMeters || 0;
     const columns: any[] = [];
 
-    // Standard baseline materials matching employee manual format from Image 2
-    const sampleImageDefaults = [
-      {
-        ref: '262740614 DT 04-07-2026',
-        desc: 'XLPE',
-        hsn: '39011090',
-        origQty: 5250.0,
-        rate: 150.476,
-        normPerMeter: 0.098,
-        earlierUsedQty: 4376.3,
-      },
-      {
-        ref: '262740510 DT 22-06-2026',
-        desc: 'PVC COMPOUND',
-        hsn: '39042290',
-        origQty: 5000.0,
-        rate: 51.0,
-        normPerMeter: 0.054,
-        earlierUsedQty: 2929.47,
-      },
-      {
-        ref: '262740870 DT 31-7-2026',
-        desc: 'GI Strip',
-        hsn: '72179019',
-        origQty: 12060.0,
-        rate: 83.0,
-        normPerMeter: 0.228,
-        earlierUsedQty: 7524.55,
-      },
-      {
-        ref: '262740500 DT 20-06-2026',
-        desc: 'Master Batch',
-        hsn: '32061900',
-        origQty: 75.0,
-        rate: 150.0,
-        normPerMeter: 0.00049,
-        earlierUsedQty: 49.89,
-      },
-      {
-        ref: '262740682 DT 14-07-2026',
-        desc: 'Aluminium Wire Rod',
-        hsn: '76041010',
-        origQty: 16739.0,
-        rate: 286.287,
-        normPerMeter: 0.348,
-        earlierUsedQty: 6195.45,
-      },
-      {
-        ref: '262740850 DT 29-07-2026',
-        desc: 'FRLS Compond',
-        hsn: '39042290',
-        origQty: 5000.0,
-        rate: 51.0,
-        normPerMeter: 0.182,
-        earlierUsedQty: 3945.0,
-      },
-    ];
+    // Group inbound challans by material in FIFO order (oldest received first)
+    // For each required material, deduct prior dispatched quantities, then allocate current advice quantity.
+    // If a challan's balance is exhausted, spill over to the customer's newer challan for that material.
+    // If no more challans exist and demand exceeds received stock, balance goes negative to indicate stock shortage.
+    const sortedInboundChallans = [...inboundChallans].sort((a: any, b: any) => {
+      const dateA = new Date(a.customerChallanDate || a.createdAt).getTime();
+      const dateB = new Date(b.customerChallanDate || b.createdAt).getTime();
+      return dateA - dateB;
+    });
 
-    if (inboundChallans.length > 0) {
-      for (const ic of inboundChallans) {
-        const challanRefStr = `${ic.customerChallanNumber || ic.challanNumber} DT ${formatDate(ic.customerChallanDate || ic.challanDate)}`;
-        for (const line of ic.lines) {
-          const mat = line.materialId as any;
-          const matName = mat?.name || line.materialCode || 'Raw Material';
-          const hsn = mat?.hsnCode || '39011090';
-          const origQty = line.receivedQuantity || line.challanQuantity || 0;
-          const rate = line.unitRate || mat?.standardCost || 100;
+    // Collect all unique materials from BOM or inbound challans
+    interface MaterialDemand {
+      materialId?: string;
+      materialName: string;
+      hsn: string;
+      normPerMeter: number;
+      standardCost: number;
+    }
+
+    const materialDemands: MaterialDemand[] = [];
+
+    // 1. From BOM items
+    for (const b of bomItems) {
+      const mat = b.materialId as any;
+      const matName = mat?.name || b.materialName || 'Raw Material';
+      const hsn = mat?.hsnCode || '39011090';
+      // Normalize norm to per 1 meter of cable:
+      // If batchSize > 1 (e.g. standard 1000m batch in Indian cable manufacturing), divide quantityPerUnit by batchSize
+      let rawNorm = b.quantityPerUnit || 0;
+      let norm = rawNorm;
+      if (bomBatchSize > 1 && rawNorm > 1) {
+        // e.g. 250 kg per 1000m batch => 0.250 kg/meter
+        norm = Number((rawNorm / bomBatchSize).toFixed(6));
+      } else if (rawNorm > 50) {
+        // Safety guard: no single meter of cable consumes > 50 kg of raw material
+        norm = Number((rawNorm / 1000).toFixed(6));
+      }
+      const cost = mat?.standardCost || 100;
+
+      const mId = mat?._id?.toString() || b.materialId?.toString();
+      if (!materialDemands.some((m) => m.materialId === mId)) {
+        materialDemands.push({
+          materialId: mId,
+          materialName: matName,
+          hsn,
+          normPerMeter: norm,
+          standardCost: cost,
+        });
+      }
+    }
+
+    // 2. Add any materials present in inbound challans but not in BOM
+    for (const ic of sortedInboundChallans) {
+      for (const line of ic.lines) {
+        const mat = line.materialId as any;
+        const matId = mat?._id?.toString() || line.materialId?.toString();
+        const matName = mat?.name || line.materialCode || 'Raw Material';
+        const hsn = mat?.hsnCode || '39011090';
+        const cost = line.unitRate || mat?.standardCost || 100;
+
+        if (matId && !materialDemands.some((m) => m.materialId === matId)) {
+          const lower = matName.toLowerCase();
+          let norm = 0.1;
+          if (lower.includes('aluminum') || lower.includes('aluminium') || lower.includes('conductor') || lower.includes('rod')) {
+            norm = 0.348;
+          } else if (lower.includes('xlpe') || lower.includes('insulation')) {
+            norm = 0.098;
+          } else if (lower.includes('frls') || lower.includes('sheath') || lower.includes('pvc')) {
+            norm = 0.182;
+          } else if (lower.includes('strip') || lower.includes('gi') || lower.includes('armour')) {
+            norm = 0.228;
+          } else if (lower.includes('master') || lower.includes('batch') || lower.includes('color')) {
+            norm = 0.00049;
+          }
+          materialDemands.push({
+            materialId: matId,
+            materialName: matName,
+            hsn,
+            normPerMeter: norm,
+            standardCost: cost,
+          });
+        }
+      }
+    }
+
+    if (materialDemands.length > 0 && sortedInboundChallans.length > 0) {
+      for (const demand of materialDemands) {
+        // Find all inbound challan lines for this material across sorted challans
+        const matchingChallanEntries: {
+          challanRef: string;
+          challanDate: Date;
+          origQty: number;
+          unitRate: number;
+          hsn: string;
+          materialName: string;
+        }[] = [];
+
+        for (const ic of sortedInboundChallans) {
+          const matchingLines = ic.lines.filter((l: any) => {
+            const lineMatId = l.materialId?._id?.toString() || l.materialId?.toString();
+            return lineMatId === demand.materialId ||
+              (l.materialCode && demand.materialName.toLowerCase().includes(l.materialCode.toLowerCase()));
+          });
+
+          for (const ml of matchingLines) {
+            const origQty = ml.receivedQuantity || ml.challanQuantity || 0;
+            const unitRate = ml.unitRate || demand.standardCost || 100;
+            const refDate = (ic as any).customerChallanDate || (ic as any).challanDate || (ic as any).createdAt;
+            matchingChallanEntries.push({
+              challanRef: `${(ic as any).customerChallanNumber || (ic as any).challanNumber} DT ${formatDate(refDate)}`,
+              challanDate: new Date(refDate),
+              origQty,
+              unitRate,
+              hsn: demand.hsn,
+              materialName: demand.materialName,
+            });
+          }
+        }
+
+        if (matchingChallanEntries.length === 0) continue;
+
+        let totalPriorDemand = Number((previousDispatchedLength * demand.normPerMeter).toFixed(2));
+        let totalCurrentDemand = Number((currentDispatchLength * demand.normPerMeter).toFixed(2));
+
+        for (let i = 0; i < matchingChallanEntries.length; i++) {
+          const entry = matchingChallanEntries[i];
+          const isLastChallan = i === matchingChallanEntries.length - 1;
+          const origQty = entry.origQty;
+          const rate = entry.unitRate;
           const origVal = Number((origQty * rate).toFixed(2));
 
-          const bomMatch = bomItems.find(
-            (b) => b.materialId?.toString() === mat?._id?.toString(),
-          );
-          let normPerMeter = bomMatch?.quantityPerUnit;
-          if (!normPerMeter || normPerMeter <= 0) {
-            const lower = matName.toLowerCase();
-            if (lower.includes('aluminum') || lower.includes('aluminium') || lower.includes('conductor') || lower.includes('rod')) {
-              normPerMeter = 0.348;
-            } else if (lower.includes('xlpe') || lower.includes('insulation')) {
-              normPerMeter = 0.098;
-            } else if (lower.includes('frls') || lower.includes('sheath') || lower.includes('pvc')) {
-              normPerMeter = 0.182;
-            } else if (lower.includes('strip') || lower.includes('gi') || lower.includes('armour')) {
-              normPerMeter = 0.228;
-            } else if (lower.includes('master') || lower.includes('batch') || lower.includes('color')) {
-              normPerMeter = 0.00049;
+          // 1. Deduct prior usage from this challan
+          let earlierUsedInThis = 0;
+          if (totalPriorDemand > 0) {
+            if (isLastChallan) {
+              // If it's the last available challan, it absorbs any remaining prior demand even if it exceeds origQty
+              earlierUsedInThis = totalPriorDemand;
+              totalPriorDemand = 0;
             } else {
-              normPerMeter = Number((origQty / Math.max(10000, (workOrder?.orderedLengthMeters || 1000) * 8)).toFixed(5));
+              earlierUsedInThis = Math.min(origQty, totalPriorDemand);
+              totalPriorDemand = Number((totalPriorDemand - earlierUsedInThis).toFixed(2));
             }
           }
+          earlierUsedInThis = Number(earlierUsedInThis.toFixed(2));
+          const earlierVal = Number((earlierUsedInThis * rate).toFixed(2));
 
-          const earlierQty = previousDispatchedLength > 0
-            ? Number((previousDispatchedLength * normPerMeter).toFixed(2))
-            : Number((origQty * 0.72).toFixed(2));
-          const earlierVal = Number((earlierQty * rate).toFixed(2));
+          // Remaining quantity available in this challan for current advice
+          const availInThis = origQty - earlierUsedInThis;
 
-          const thisAdviceQty = Number((currentDispatchLength * normPerMeter).toFixed(2));
-          const thisAdviceVal = Number((thisAdviceQty * rate).toFixed(2));
+          // 2. Deduct current advice usage from this challan
+          let thisAdviceInThis = 0;
+          if (totalCurrentDemand > 0) {
+            if (isLastChallan) {
+              // Last challan: absorbs all remaining advice demand. If availInThis < totalCurrentDemand, balance goes negative!
+              thisAdviceInThis = totalCurrentDemand;
+              totalCurrentDemand = 0;
+            } else {
+              // Use up to available in this challan; remaining demand will be fulfilled by next (newer) challan
+              if (availInThis > 0) {
+                thisAdviceInThis = Math.min(availInThis, totalCurrentDemand);
+                totalCurrentDemand = Number((totalCurrentDemand - thisAdviceInThis).toFixed(2));
+              } else {
+                thisAdviceInThis = 0;
+              }
+            }
+          }
+          thisAdviceInThis = Number(thisAdviceInThis.toFixed(2));
+          const thisAdviceVal = Number((thisAdviceInThis * rate).toFixed(2));
 
-          const balanceQty = Number(Math.max(0, origQty - earlierQty - thisAdviceQty).toFixed(2));
+          // 3. Balance In Hand: can be negative if demand exceeded total available stock
+          const balanceQty = Number((origQty - earlierUsedInThis - thisAdviceInThis).toFixed(2));
           const balanceVal = Number((balanceQty * rate).toFixed(2));
 
+          // If a challan has already been fully depleted in earlier advices (availInThis <= 0, thisAdviceInThis === 0, balanceQty === 0),
+          // do not show it on the sheet/export.
+          if (earlierUsedInThis >= origQty && thisAdviceInThis === 0 && balanceQty === 0) {
+            continue;
+          }
+
           columns.push({
-            challanRef: challanRefStr,
-            description: matName,
-            hsn,
+            challanRef: entry.challanRef,
+            description: entry.materialName,
+            hsn: entry.hsn,
             unitRate: rate,
             originallyReceived: { qty: origQty, value: origVal },
             processingLoss: { qty: 0, value: 0 },
             netQuantity: { qty: origQty, value: origVal },
-            qtyUsedEarlier: { qty: earlierQty, value: earlierVal },
-            qtyUsedThisAdvice: { qty: thisAdviceQty, value: thisAdviceVal },
+            qtyUsedEarlier: { qty: earlierUsedInThis, value: earlierVal },
+            qtyUsedThisAdvice: { qty: thisAdviceInThis, value: thisAdviceVal },
             balanceInHand: { qty: balanceQty, value: balanceVal },
             qtyReturn: { qty: 0, value: 0 },
           });
@@ -1037,39 +1132,6 @@ export class DispatchService {
       }
     }
 
-    // Default sample columns matching Image 2
-    if (columns.length === 0) {
-      for (const sample of sampleImageDefaults) {
-        const origVal = Number((sample.origQty * sample.rate).toFixed(2));
-        const earlierVal = Number((sample.earlierUsedQty * sample.rate).toFixed(2));
-        const thisAdviceQty = sample.thisAdviceQty !== undefined
-          ? sample.thisAdviceQty
-          : Number((currentDispatchLength * sample.normPerMeter).toFixed(2));
-        const thisAdviceVal = Number((thisAdviceQty * sample.rate).toFixed(2));
-        const balanceQty = sample.balanceQty !== undefined
-          ? sample.balanceQty
-          : Number(Math.max(0, sample.origQty - sample.earlierUsedQty - thisAdviceQty).toFixed(2));
-        const balanceVal = Number((balanceQty * sample.rate).toFixed(2));
-
-        columns.push({
-          challanRef: sample.ref,
-          description: sample.desc,
-          hsn: sample.hsn,
-          unitRate: sample.rate,
-          originallyReceived: { qty: sample.origQty, value: origVal },
-          processingLoss: { qty: 0, value: 0 },
-          netQuantity: { qty: sample.origQty, value: origVal },
-          qtyUsedEarlier: { qty: sample.earlierUsedQty, value: earlierVal },
-          qtyUsedThisAdvice: { qty: thisAdviceQty, value: thisAdviceVal },
-          balanceInHand: { qty: balanceQty, value: balanceVal },
-          qtyReturn: { qty: 0, value: 0 },
-          earlierBreakdown: sample.breakdown || [
-            { adviceName: 'Advice 1', qty: Number((sample.earlierUsedQty * 0.9).toFixed(2)), value: Number((earlierVal * 0.9).toFixed(2)) },
-            { adviceName: 'Advice 2', qty: Number((sample.earlierUsedQty * 0.1).toFixed(2)), value: Number((earlierVal * 0.1).toFixed(2)) },
-          ],
-        });
-      }
-    }
 
     const payload = {
       company: {

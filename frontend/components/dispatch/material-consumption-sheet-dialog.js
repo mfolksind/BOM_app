@@ -18,151 +18,12 @@ import {
   Save,
   Pencil,
   CheckCircle2,
-  Sparkles,
   Plus,
   Trash2,
   RefreshCw,
   RotateCcw,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-
-export const SAMPLE_IMAGE_2_DATA = {
-  company: {
-    name: 'MFOLKS INDUSTRIES PRIVATE LIMITED',
-    address: 'F-279 A, RIICO Industrial Area, Chopanki, Tapukara, Alwar, Rajasthan, India - 301707',
-    gstin: '08AAOCM2650D1ZI',
-    pan: 'AAOCM2650D',
-    cin: 'U27320DL2021PTC376425',
-  },
-  documentTitle: 'Material Consumption Sheet',
-  subtitle:
-    '(For return of goods, in more than one lot to the parent factory received partially processed / goods for further processing / operation under rule of GST on job basis.)',
-  metadata: {
-    challanNumber: 'MF/DC/408',
-    date: '17-08-2026',
-    recipientName: 'M/s. V-MARC INDIA LIMITED',
-    recipientAddress:
-      'Khasra No. 1,2,6, Village-Mukrabpur Bahadrabad Bhagwanpur Road Tehsil Roorkee-247667',
-    recipientGstin: '05AAMCA4908L1ZG',
-    natureOfProcess: 'Cable Processing (Semi finished cable)',
-    descriptionOfGoodsReturned: '4CX35 SQMM A2XFY',
-    dispatchQuantity: '1997.000 mtrs (9 drum as per packing list)',
-    workOrderNumberAndDate: 'MF-2026-01',
-  },
-  columns: [
-    {
-      challanRef: '262740614 DT-04-07-2026',
-      description: 'XLPE',
-      hsn: '39011090',
-      unitRate: 150.47619,
-      originallyReceived: { qty: 5250.0, value: 790000.0 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 5250.0, value: 790000.0 },
-      qtyUsedEarlier: { qty: 4376.3, value: 658528.95 },
-      qtyUsedThisAdvice: { qty: 195.71, value: 29449.7 },
-      balanceInHand: { qty: 677.99, value: 102021.35 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 3934.03, value: 591977.85 },
-        { adviceName: 'Advice 2', qty: 442.27, value: 66551.1 },
-      ],
-    },
-    {
-      challanRef: '262740510 DT-22-06-2026',
-      description: 'PVC COMPOUND',
-      hsn: '39042290',
-      unitRate: 51.0,
-      originallyReceived: { qty: 5000.0, value: 255000.0 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 5000.0, value: 255000.0 },
-      qtyUsedEarlier: { qty: 2929.47, value: 149402.97 },
-      qtyUsedThisAdvice: { qty: 107.84, value: 5499.84 },
-      balanceInHand: { qty: 1962.69, value: 100097.19 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 2685.77, value: 136974.27 },
-        { adviceName: 'Advice 2', qty: 243.7, value: 12428.7 },
-      ],
-    },
-    {
-      challanRef: '262740870 DT 31-7-2026',
-      description: 'GI Strip',
-      hsn: '72179019',
-      unitRate: 83.0,
-      originallyReceived: { qty: 12060.0, value: 1000980.0 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 12060.0, value: 1000980.0 },
-      qtyUsedEarlier: { qty: 7524.55, value: 624537.65 },
-      qtyUsedThisAdvice: { qty: 455.32, value: 37791.56 },
-      balanceInHand: { qty: 4080.13, value: 338650.79 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 6495.59, value: 539133.97 },
-        { adviceName: 'Advice 2', qty: 1028.96, value: 85403.68 },
-      ],
-    },
-    {
-      challanRef: '262740500 DT-20-06-2026',
-      description: 'Master Batch',
-      hsn: '32061900',
-      unitRate: 150.0,
-      originallyReceived: { qty: 75.0, value: 11250.0 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 75.0, value: 11250.0 },
-      qtyUsedEarlier: { qty: 49.89, value: 7483.5 },
-      qtyUsedThisAdvice: { qty: 0.98, value: 147.0 },
-      balanceInHand: { qty: 24.13, value: 3619.5 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 47.68, value: 7152.0 },
-        { adviceName: 'Advice 2', qty: 2.21, value: 331.5 },
-      ],
-    },
-    {
-      challanRef: '262740682 DT 14-07-2026',
-      description: 'Aluminium Wire Rod',
-      hsn: '76041010',
-      unitRate: 286.2873,
-      originallyReceived: { qty: 16739.0, value: 4792163.2 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 16739.0, value: 4792163.2 },
-      qtyUsedEarlier: { qty: 6195.45, value: 2160972.96 },
-      qtyUsedThisAdvice: { qty: 694.96, value: 242402.05 },
-      balanceInHand: { qty: 9848.59, value: 3435188.19 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 4624.93, value: 1613175.58 },
-        { adviceName: 'Advice 2', qty: 1570.52, value: 547797.38 },
-      ],
-    },
-    {
-      challanRef: '262740850 DT 29-07-2026',
-      description: 'FRLS Compond',
-      hsn: '39042290',
-      unitRate: 51.0,
-      originallyReceived: { qty: 5000.0, value: 255000.0 },
-      processingLoss: { qty: 0.0, value: 0.0 },
-      netQuantity: { qty: 5000.0, value: 255000.0 },
-      qtyUsedEarlier: { qty: 3945.0, value: 201195.0 },
-      qtyUsedThisAdvice: { qty: 363.45, value: 18535.95 },
-      balanceInHand: { qty: 691.55, value: 35269.05 },
-      qtyReturn: { qty: 0.0, value: 0.0 },
-      earlierBreakdown: [
-        { adviceName: 'Advice 1', qty: 3123.63, value: 159305.13 },
-        { adviceName: 'Advice 2', qty: 821.37, value: 41889.87 },
-      ],
-    },
-  ],
-  dispatchDetails: {
-    dateOfDispatch: '17-08-2026',
-    vehicleNumber: 'UP17BT 0896',
-    placeOfSupply: 'Haridwar-Uttarakhand.',
-    place: 'Chopanki',
-    date: '17-08-2026',
-    remarks: 'Being goods returned back to prinicpal after partly completion of job work.',
-    authorizedSignatory: 'For MFOLKS INDUSTRIES PRIVATE LIMITED',
-  },
-};
 
 export function MaterialConsumptionSheetDialog({
   open,
@@ -176,10 +37,33 @@ export function MaterialConsumptionSheetDialog({
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Helper to group columns so all challans of the same product/material appear adjacent to each other
+  const groupColumnsByMaterial = (cols) => {
+    if (!Array.isArray(cols) || cols.length <= 1) return cols;
+    // Stable group by description / material name, keeping challans of the same product contiguous
+    const groups = new Map();
+    for (const col of cols) {
+      const key = (col.description || '').trim().toLowerCase();
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push(col);
+    }
+    const grouped = [];
+    for (const group of groups.values()) {
+      grouped.push(...group);
+    }
+    return grouped;
+  };
+
   useEffect(() => {
     if (open) {
       if (initialData) {
-        setData(initialData);
+        const sorted = {
+          ...initialData,
+          columns: groupColumnsByMaterial(initialData.columns),
+        };
+        setData(sorted);
       } else if (challanId) {
         fetchSheetData();
       }
@@ -196,7 +80,11 @@ export function MaterialConsumptionSheetDialog({
     try {
       const res = await api.get(`/outbound-challans/${challanId}/consumption-sheet`);
       if (res?.data) {
-        setData(res.data);
+        const sheetData = res.data;
+        if (Array.isArray(sheetData.columns)) {
+          sheetData.columns = groupColumnsByMaterial(sheetData.columns);
+        }
+        setData(sheetData);
       }
     } catch (err) {
       toast.error(err.message || 'Failed to load Material Consumption Sheet');
@@ -233,12 +121,12 @@ export function MaterialConsumptionSheetDialog({
       const netVal = Number((netQty * rate).toFixed(2));
       col.netQuantity = { qty: netQty, value: netVal };
 
-      // Balance In Hand = Net Quantity - Earlier Used - This Advice - Return Qty
+      // Balance In Hand = Net Quantity - Earlier Used - This Advice - Return Qty (allows negative if over-consumed)
       const earlierQty = col.qtyUsedEarlier?.qty || 0;
       const thisAdviceQty = col.qtyUsedThisAdvice?.qty || 0;
       const returnQty = col.qtyReturn?.qty || 0;
 
-      const balQty = Number(Math.max(0, netQty - earlierQty - thisAdviceQty - returnQty).toFixed(2));
+      const balQty = Number((netQty - earlierQty - thisAdviceQty - returnQty).toFixed(2));
       const balVal = Number((balQty * rate).toFixed(2));
       col.balanceInHand = { qty: balQty, value: balVal };
 
@@ -334,10 +222,7 @@ export function MaterialConsumptionSheetDialog({
     });
   };
 
-  const handleLoadSampleImage2 = () => {
-    setData(JSON.parse(JSON.stringify(SAMPLE_IMAGE_2_DATA)));
-    toast.success('Loaded exact Image 2 reference format (V-MARC 1,997 m / 6 Materials)!');
-  };
+
 
   const handleSaveSheet = async () => {
     if (!challanId) {
@@ -457,17 +342,7 @@ export function MaterialConsumptionSheetDialog({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleLoadSampleImage2}
-              className="h-8 text-xs border-indigo-400/60 bg-indigo-950/60 text-indigo-200 hover:bg-indigo-900 gap-1.5 cursor-pointer font-medium"
-              title="Pre-fills exact 6-material data matching the scanned sheet"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              Load Image 2 Sample (1,997 m / 6 Materials)
-            </Button>
+            
 
             <Button
               type="button"
@@ -528,9 +403,28 @@ export function MaterialConsumptionSheetDialog({
             <p className="text-xs font-semibold">Loading Material Consumption Sheet...</p>
           </div>
         ) : (
-          /* Printable Document (Exact Match of Image 2) */
-          <div className="p-8 bg-white overflow-x-auto text-slate-900" ref={printRef}>
-            {/* Company Header */}
+          <div>
+            {/* Shortage & Negative Balance Notification Banner */}
+            {columns?.some((c) => Number(c.balanceInHand?.qty || 0) < 0) && (
+              <div className="mx-6 mt-4 p-3 bg-rose-50 border border-rose-300 rounded-lg flex items-center justify-between text-xs text-rose-800 print:hidden shadow-xs">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-rose-200 text-rose-900 rounded-md font-bold">⚠️</span>
+                  <div>
+                    <span className="font-bold">Raw Material Over-consumption / Shortage Detected: </span>
+                    <span>
+                      One or more materials show a <strong>negative Balance In Hand</strong>. The customer&apos;s available inbound challans did not have enough stock to fulfill this advice.
+                    </span>
+                  </div>
+                </div>
+                <span className="font-mono font-semibold bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-300">
+                  {columns.filter((c) => Number(c.balanceInHand?.qty || 0) < 0).length} Material(s) Negative
+                </span>
+              </div>
+            )}
+
+            {/* Printable Document (Exact Match of Image 2) */}
+            <div className="p-8 bg-white overflow-x-auto text-slate-900" ref={printRef}>
+              {/* Company Header */}
             <div className="text-center pb-2">
               <h1 className="text-base font-black tracking-wide text-slate-900 uppercase">
                 {company?.name || 'MFOLKS INDUSTRIES PRIVATE LIMITED'}
@@ -580,10 +474,9 @@ export function MaterialConsumptionSheetDialog({
               </div>
             </div>
 
-            {/* Recipient & Job-Work Details Rows (1 to 6) */}
+            {/* Recipient & Job-Work Details Rows (without serial numbers) */}
             <div className="space-y-1 text-xs mb-3 font-sans">
               <div className="flex items-start">
-                <span className="w-6 font-bold">1</span>
                 <span className="w-64 font-semibold text-slate-800">Name &amp; address of the Receipient</span>
                 <div className="flex-1 font-bold">
                   {isEditing ? (
@@ -614,7 +507,6 @@ export function MaterialConsumptionSheetDialog({
               </div>
 
               <div className="flex items-center">
-                <span className="w-6 font-bold">2</span>
                 <span className="w-64 font-semibold text-slate-800">Registration No. of the parent factory</span>
                 <div className="flex-1 font-bold font-mono text-slate-900">
                   {isEditing ? (
@@ -630,7 +522,6 @@ export function MaterialConsumptionSheetDialog({
               </div>
 
               <div className="flex items-center">
-                <span className="w-6 font-bold">3</span>
                 <span className="w-64 font-semibold text-slate-800">Nature of Process</span>
                 <div className="flex-1 text-slate-900 font-medium">
                   {isEditing ? (
@@ -646,7 +537,6 @@ export function MaterialConsumptionSheetDialog({
               </div>
 
               <div className="flex items-center">
-                <span className="w-6 font-bold">4</span>
                 <span className="w-64 font-semibold text-slate-800">Description of goods returned</span>
                 <div className="flex-1 font-bold font-mono text-slate-900 uppercase">
                   {isEditing ? (
@@ -662,7 +552,6 @@ export function MaterialConsumptionSheetDialog({
               </div>
 
               <div className="flex items-center">
-                <span className="w-6 font-bold">5</span>
                 <span className="w-64 font-semibold text-slate-800">Dispatch Quantity in Kgs/Mtrs</span>
                 <div className="flex-1 font-bold font-mono text-slate-900">
                   {isEditing ? (
@@ -678,7 +567,6 @@ export function MaterialConsumptionSheetDialog({
               </div>
 
               <div className="flex items-center">
-                <span className="w-6 font-bold">6</span>
                 <span className="w-64 font-semibold text-slate-800">WO no and Date</span>
                 <div className="flex-1 font-bold font-mono text-slate-900">
                   {isEditing ? (
@@ -694,14 +582,13 @@ export function MaterialConsumptionSheetDialog({
               </div>
             </div>
 
-            {/* Grid Table of Inbound Raw Materials (Rows 7 to 16) */}
+            {/* Grid Table of Inbound Raw Materials */}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse border border-slate-900 text-[10.5px] text-center font-sans">
                 <thead>
-                  {/* Row 7: Challan Ref No. & Date */}
+                  {/* Challan Ref No. & Date */}
                   <tr className="bg-slate-50">
-                    <th className="border border-slate-900 p-1 w-7 text-center font-bold">7</th>
-                    <th className="border border-slate-900 p-1.5 text-left font-bold w-52">
+                    <th className="border border-slate-900 p-1.5 text-left font-bold w-56">
                       Challan Ref.No. &amp; Date
                     </th>
                     {columns?.map((c, i) => (
@@ -735,10 +622,9 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 8: Description of Goods Received */}
+                  {/* Description of Goods Received */}
                   <tr className="bg-slate-50">
-                    <th className="border border-slate-900 p-1 text-center font-bold">8</th>
-                    <th className="border border-slate-900 p-1 text-left font-bold">
+                    <th className="border border-slate-900 p-1.5 text-left font-bold">
                       Description of goods received
                     </th>
                     {columns?.map((c, i) => (
@@ -760,10 +646,9 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 9: HSN */}
+                  {/* HSN */}
                   <tr className="bg-slate-50">
-                    <th className="border border-slate-900 p-1 text-center font-bold">9</th>
-                    <th className="border border-slate-900 p-1 text-left font-bold">HSN</th>
+                    <th className="border border-slate-900 p-1.5 text-left font-bold">HSN</th>
                     {columns?.map((c, i) => (
                       <th
                         key={i}
@@ -785,7 +670,6 @@ export function MaterialConsumptionSheetDialog({
 
                   {/* Tariff Classification Sub-Header */}
                   <tr className="bg-slate-100 text-[10px] font-bold">
-                    <th className="border border-slate-900 p-1 text-center font-bold">—</th>
                     <th className="border border-slate-900 p-1 text-left font-bold">
                       Tariff Classification
                     </th>
@@ -799,9 +683,8 @@ export function MaterialConsumptionSheetDialog({
                 </thead>
 
                 <tbody>
-                  {/* Row 10: Originally Qty. Received */}
+                  {/* Originally Qty. Received */}
                   <tr>
-                    <td className="border border-slate-900 p-1 font-bold">10</td>
                     <td className="border border-slate-900 p-1 text-left font-bold pl-2">
                       Originally Qty. Received (In Kgs &amp; Mtr)
                     </td>
@@ -841,9 +724,8 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 11: Less Processing Loss */}
+                  {/* Less Processing Loss */}
                   <tr>
-                    <td className="border border-slate-900 p-1 font-bold">11</td>
                     <td className="border border-slate-900 p-1 text-left font-medium pl-2 text-slate-700">
                       Less Processing Loss (Kgs &amp; Mtr)
                     </td>
@@ -871,9 +753,8 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 12: Net Quantity */}
+                  {/* Net Quantity */}
                   <tr className="bg-slate-50 font-bold">
-                    <td className="border border-slate-900 p-1 font-bold">12</td>
                     <td className="border border-slate-900 p-1 text-left font-bold pl-2">
                       Net Quantity of goods (Kgs &amp; Mtr)
                     </td>
@@ -889,9 +770,8 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 13: Qty. Used Earlier Advices */}
+                  {/* Qty. Used Earlier Advices */}
                   <tr>
-                    <td className="border border-slate-900 p-1 font-bold">13</td>
                     <td className="border border-slate-900 p-1 text-left font-medium pl-2 text-slate-700">
                       Qty. Used Earlier Advices (Kgs &amp; Mtr)
                     </td>
@@ -919,9 +799,8 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 14: Qty. Used under this Advice */}
+                  {/* Qty. Used under this Advice */}
                   <tr className="bg-amber-50/70 font-bold">
-                    <td className="border border-slate-900 p-1 font-bold">14</td>
                     <td className="border border-slate-900 p-1 text-left font-bold pl-2 text-amber-950">
                       Qty. Used under this Advice (Kgs &amp; Mtr)
                     </td>
@@ -949,27 +828,36 @@ export function MaterialConsumptionSheetDialog({
                     ))}
                   </tr>
 
-                  {/* Row 15: Balance Qty. In Hand */}
+                  {/* Balance Qty. In Hand */}
                   <tr className="bg-emerald-50/80 font-black">
-                    <td className="border border-slate-900 p-1 font-bold">15</td>
                     <td className="border border-slate-900 p-1 text-left font-black pl-2 text-emerald-950">
                       Balance Qty. In Hand (Kgs &amp; Mtr)
                     </td>
-                    {columns?.map((c, i) => (
-                      <React.Fragment key={i}>
-                        <td className="border border-slate-900 p-1 num-cell font-mono font-black text-emerald-950 text-[11px]">
-                          {Number(c.balanceInHand?.qty || 0).toFixed(2)}
-                        </td>
-                        <td className="border border-slate-900 p-1 num-cell font-mono font-black text-emerald-950 text-[11px]">
-                          {Number(c.balanceInHand?.value || 0).toFixed(2)}
-                        </td>
-                      </React.Fragment>
-                    ))}
+                    {columns?.map((c, i) => {
+                      const isNegative = Number(c.balanceInHand?.qty || 0) < 0;
+                      return (
+                        <React.Fragment key={i}>
+                          <td
+                            className={`border border-slate-900 p-1 num-cell font-mono font-black text-[11px] ${
+                              isNegative ? 'bg-rose-100 text-rose-700 font-extrabold' : 'text-emerald-950'
+                            }`}
+                          >
+                            {Number(c.balanceInHand?.qty || 0).toFixed(2)}
+                          </td>
+                          <td
+                            className={`border border-slate-900 p-1 num-cell font-mono font-black text-[11px] ${
+                              isNegative ? 'bg-rose-100 text-rose-700 font-extrabold' : 'text-emerald-950'
+                            }`}
+                          >
+                            {Number(c.balanceInHand?.value || 0).toFixed(2)}
+                          </td>
+                        </React.Fragment>
+                      );
+                    })}
                   </tr>
 
-                  {/* Row 16: Qty. Return */}
+                  {/* Qty. Return */}
                   <tr>
-                    <td className="border border-slate-900 p-1 font-bold">16</td>
                     <td className="border border-slate-900 p-1 text-left font-medium pl-2 text-slate-700">
                       Qty. Return (Kgs)
                     </td>
@@ -1000,11 +888,10 @@ export function MaterialConsumptionSheetDialog({
               </table>
             </div>
 
-            {/* Transport & Supply Details (Rows 17 to 19) */}
+            {/* Transport & Supply Details */}
             <div className="grid grid-cols-2 gap-x-8 text-xs mt-3 border border-slate-900 p-3 font-sans">
               <div className="space-y-1">
                 <div className="flex items-center">
-                  <span className="w-6 font-bold">17</span>
                   <span className="w-36 font-semibold text-slate-700">Date of Dispatch :</span>
                   {isEditing ? (
                     <Input
@@ -1019,7 +906,6 @@ export function MaterialConsumptionSheetDialog({
                   )}
                 </div>
                 <div className="flex items-center">
-                  <span className="w-6 font-bold">18</span>
                   <span className="w-36 font-semibold text-slate-700">Vehicle No. :</span>
                   {isEditing ? (
                     <Input
@@ -1034,7 +920,6 @@ export function MaterialConsumptionSheetDialog({
                   )}
                 </div>
                 <div className="flex items-center">
-                  <span className="w-6 font-bold">19</span>
                   <span className="w-36 font-semibold text-slate-700">Place of Supply :</span>
                   {isEditing ? (
                     <Input
@@ -1167,6 +1052,7 @@ export function MaterialConsumptionSheetDialog({
                 </table>
               </div>
             </div>
+          </div>
           </div>
         )}
       </DialogContent>
