@@ -275,65 +275,104 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
         const printContent = printRef.current;
         if (!printContent) return;
 
-        const winPrint = window.open("", "", "left=0,top=0,width=1200,height=900,toolbar=0,scrollbars=0,status=0");
+        // Clone node so we can safely convert any active input fields to their typed values for printing
+        const clone = printContent.cloneNode(true);
+        const originalInputs = printContent.querySelectorAll("input, textarea, select");
+        const clonedInputs = clone.querySelectorAll("input, textarea, select");
+
+        clonedInputs.forEach((clonedEl, idx) => {
+            const origEl = originalInputs[idx];
+            const val = origEl ? origEl.value : clonedEl.value;
+            const span = document.createElement("span");
+            span.textContent = val || "—";
+            span.className = clonedEl.className.replace(/border[^\s]*/g, "").replace(/h-[^\s]*/g, "");
+            span.style.display = "inline-block";
+            span.style.padding = "2px 4px";
+            clonedEl.parentNode.replaceChild(span, clonedEl);
+        });
+
+        // Collect all stylesheets from main document
+        const styleElements = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+            .map((el) => el.outerHTML)
+            .join("\n");
+
+        const winPrint = window.open("", "", "left=0,top=0,width=1280,height=900,toolbar=0,scrollbars=0,status=0");
         winPrint.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <title>Material Consumption Sheet - ${data?.metadata?.challanNumber || "Challan"}</title>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          ${styleElements}
           <style>
-            @page { size: A4 landscape; margin: 8mm; }
-            body {
-              font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-              font-size: 9.5px;
-              color: #000;
-              margin: 0;
-              padding: 4px;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
+            @page {
+              size: A4 landscape;
+              margin: 6mm;
             }
-            .company-header { text-align: center; margin-bottom: 6px; }
-            .company-name { font-size: 13px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; }
-            .company-sub { font-size: 9px; margin-top: 1px; color: #222; }
-            .sheet-title { text-align: center; font-size: 12px; font-weight: bold; margin: 5px 0 2px 0; text-decoration: underline; text-transform: uppercase; }
-            .sheet-subtitle { text-align: center; font-size: 8.5px; font-style: italic; margin-bottom: 6px; max-width: 900px; margin-left: auto; margin-right: auto; }
-
-            .top-bar { display: flex; justify-content: space-between; font-weight: bold; font-size: 10px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 3px 0; margin-bottom: 6px; }
-
-            .meta-section { margin-bottom: 6px; font-size: 9.5px; line-height: 1.35; }
-            .meta-row { display: flex; align-items: baseline; margin-bottom: 2px; }
-            .meta-num { width: 18px; font-weight: bold; }
-            .meta-label { width: 230px; font-weight: 600; color: #222; }
-            .meta-val { flex: 1; font-weight: bold; }
-
-            table.sheet-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 9px; }
-            table.sheet-table th, table.sheet-table td { border: 1px solid #000; padding: 2.5px 3px; }
-            table.sheet-table th { background-color: #f7f7f7; font-weight: bold; text-align: center; }
-            .col-num { width: 18px; text-align: center; font-weight: bold; }
-            .row-title { text-align: left; font-weight: 600; padding-left: 4px !important; width: 230px; white-space: nowrap; }
-            .num-cell { font-family: "Courier New", Courier, monospace; text-align: right; padding-right: 4px !important; font-size: 9.5px; }
-            .bold-cell { font-weight: bold; }
-            .highlight-cell { background-color: #fff9e6; }
-            .net-row td { background-color: #fcfcfc; font-weight: bold; }
-            .advice-row td { font-weight: bold; }
-            .bal-row td { font-weight: 900; }
-
-            .transport-grid { display: flex; justify-content: space-between; border: 1px solid #000; padding: 4px 8px; margin-top: 6px; font-size: 9.5px; }
-            .transport-left { width: 55%; }
-            .transport-right { width: 40%; }
-            .transport-row { display: flex; margin-bottom: 2px; }
-
-            .bottom-section { margin-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 9.5px; }
-            .remarks-box { max-width: 50%; font-size: 9px; line-height: 1.3; }
-            .sign-box { text-align: right; font-weight: bold; padding-right: 15px; }
-            .sign-space { height: 40px; }
-
-            .breakdown-table { border-collapse: collapse; margin-top: 10px; margin-left: auto; font-size: 8.5px; font-family: "Courier New", Courier, monospace; }
-            .breakdown-table td { border: 1px solid #777; padding: 1.5px 5px; text-align: right; }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            html, body {
+              background: #ffffff !important;
+              color: #0f172a !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+            }
+            body {
+              padding: 4mm !important;
+            }
+            table {
+              border-collapse: collapse !important;
+            }
+            /* Explicit fallback colors if Tailwind print stripping occurs */
+            .bg-amber-50\\/70, .bg-amber-50 {
+              background-color: #fffbeb !important;
+            }
+            .bg-emerald-50\\/80, .bg-emerald-50 {
+              background-color: #ecfdf5 !important;
+            }
+            .bg-rose-100 {
+              background-color: #ffe4e6 !important;
+            }
+            .bg-slate-50 {
+              background-color: #f8fafc !important;
+            }
+            .bg-slate-100 {
+              background-color: #f1f5f9 !important;
+            }
+            .text-amber-950 {
+              color: #451a03 !important;
+            }
+            .text-emerald-950 {
+              color: #022c22 !important;
+            }
+            .text-rose-700 {
+              color: #be123c !important;
+            }
+            .border-slate-900 {
+              border-color: #0f172a !important;
+            }
+            .border-slate-400 {
+              border-color: #94a3b8 !important;
+            }
+            @media print {
+              body {
+                padding: 0 !important;
+              }
+              button {
+                display: none !important;
+              }
+            }
           </style>
         </head>
-        <body>
-          ${printContent.innerHTML}
+        <body class="bg-white text-slate-900 antialiased">
+          <div class="print-container">
+            ${clone.innerHTML}
+          </div>
         </body>
       </html>
     `);
@@ -342,7 +381,7 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
         setTimeout(() => {
             winPrint.print();
             winPrint.close();
-        }, 250);
+        }, 350);
     };
 
     if (!data) return null;

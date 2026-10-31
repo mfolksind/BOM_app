@@ -146,7 +146,7 @@ export default function PackingPage() {
         }
     };
 
-    // Handle Generating Delivery Challan with Consumption Sheet (Image 2)
+    // Handle Generating Delivery Challan with Consumption Sheet
     const handleGenerateChallan = async (pl) => {
         try {
             const res = await apiClient(`/packing-lists/${pl._id}/generate-challan`, {
@@ -506,7 +506,7 @@ export default function PackingPage() {
                                                         </Button>
                                                     )}
 
-                                                    {/* Step 2: Generate Delivery Challan with Consumption Sheet (Image 2) */}
+                                                    {/* Step 2: Generate Delivery Challan with Consumption Sheet   */}
                                                     {pl.status === "PACKED" && (
                                                         <Button
                                                             size="sm"
@@ -529,7 +529,7 @@ export default function PackingPage() {
                                                             className="h-8 text-xs px-2.5 gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
                                                         >
                                                             <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
-                                                            Consumption Sheet (Image 2)
+                                                            Consumption Sheet
                                                         </Button>
                                                     )}
                                                 </div>
@@ -1054,7 +1054,7 @@ export default function PackingPage() {
                 />
             )}
 
-            {/* Material Consumption Sheet Dialog (Image 2) */}
+            {/* Material Consumption Sheet Dialog   */}
             {previewChallanId && (
                 <MaterialConsumptionSheetDialog
                     challanId={previewChallanId}

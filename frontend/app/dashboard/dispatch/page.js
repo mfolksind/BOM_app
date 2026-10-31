@@ -166,7 +166,7 @@ export default function DispatchManagementPage() {
                         Outbound Dispatch &amp; Delivery Challans
                     </h1>
                     <p className="text-slate-500 text-sm mt-0.5">
-                        Manage statutory GST Job-Work Delivery Challans, Material Consumption Sheets (Image 2), and vehicle shipments.
+                        Manage statutory GST Job-Work Delivery Challans, Material Consumption Sheets , and vehicle shipments.
                     </p>
                 </div>
 
@@ -322,7 +322,7 @@ export default function DispatchManagementPage() {
                                                     </Button>
                                                 )}
 
-                                                {/* Material Consumption Sheet (Image 2) */}
+                                                {/* Material Consumption Sheet   */}
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
@@ -330,7 +330,7 @@ export default function DispatchManagementPage() {
                                                     className="h-8 text-xs px-2.5 gap-1.5 text-emerald-700 bg-emerald-50/50 hover:bg-emerald-100 hover:text-emerald-800 border-emerald-200 shadow-xs font-semibold"
                                                 >
                                                     <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
-                                                    Consumption Sheet (Image 2)
+                                                    Consumption Sheet
                                                 </Button>
                                             </div>
                                         </TableCell>
@@ -481,7 +481,7 @@ export default function DispatchManagementPage() {
                 }}
             />
 
-            {/* Dialog: Material Consumption Sheet (Image 2) */}
+            {/* Dialog: Material Consumption Sheet   */}
             {selectedChallanId && (
                 <MaterialConsumptionSheetDialog
                     challanId={selectedChallanId}

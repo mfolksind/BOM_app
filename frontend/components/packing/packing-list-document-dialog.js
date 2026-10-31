@@ -46,32 +46,82 @@ export function PackingListDocumentDialog({ open, onOpenChange, documentData: pr
         const printContent = printRef.current;
         if (!printContent) return;
 
-        const winPrint = window.open("", "", "left=0,top=0,width=900,height=900,toolbar=0,scrollbars=0,status=0");
+        // Clone node
+        const clone = printContent.cloneNode(true);
+
+        // Collect all stylesheets from main document
+        const styleElements = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+            .map((el) => el.outerHTML)
+            .join("\n");
+
+        const winPrint = window.open("", "", "left=0,top=0,width=1000,height=900,toolbar=0,scrollbars=0,status=0");
         winPrint.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <title>Packing List - ${data?.header?.packingNumber || "MF-PL"}</title>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          ${styleElements}
           <style>
-            @page { size: A4 portrait; margin: 10mm; }
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 10px; }
-            .header-center { text-align: center; margin-bottom: 12px; }
-            .company-name { font-size: 16px; font-weight: 800; letter-spacing: 0.5px; }
-            .company-sub { font-size: 10px; margin-top: 2px; }
-            .title-box { text-align: center; font-size: 13px; font-weight: bold; margin: 10px 0 6px 0; letter-spacing: 1px; }
-            table.meta-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-            table.meta-table td { padding: 3px 6px; font-size: 11px; vertical-align: top; }
-            .label { font-weight: 600; width: 14%; }
-            .val-box { border: 1px solid #000; padding: 2px 6px; font-weight: bold; display: inline-block; }
-            table.grid-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-            table.grid-table th, table.grid-table td { border: 1px solid #000; padding: 4px 6px; font-size: 11px; text-align: center; }
-            table.grid-table th { font-weight: bold; background-color: #f2f2f2; }
-            .total-row td { font-weight: bold; border-top: 1px solid #000; }
-            .footer-sign { margin-top: 25px; text-align: right; font-weight: bold; font-size: 11px; padding-right: 15px; }
+            @page {
+              size: A4 portrait;
+              margin: 8mm;
+            }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            html, body {
+              background: #ffffff !important;
+              color: #0f172a !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+            }
+            body {
+              padding: 4mm !important;
+            }
+            table {
+              border-collapse: collapse !important;
+            }
+            /* Explicit fallback colors if Tailwind print stripping occurs */
+            .bg-slate-100\\/90, .bg-slate-100 {
+              background-color: #f1f5f9 !important;
+            }
+            .bg-amber-50 {
+              background-color: #fffbeb !important;
+            }
+            .bg-slate-50\\/50, .bg-slate-50 {
+              background-color: #f8fafc !important;
+            }
+            .border-slate-800 {
+              border-color: #1e293b !important;
+            }
+            .border-slate-900 {
+              border-color: #0f172a !important;
+            }
+            .border-slate-300 {
+              border-color: #cbd5e1 !important;
+            }
+            .border-slate-200 {
+              border-color: #e2e8f0 !important;
+            }
+            @media print {
+              body {
+                padding: 0 !important;
+              }
+              button {
+                display: none !important;
+              }
+            }
           </style>
         </head>
-        <body>
-          ${printContent.innerHTML}
+        <body class="bg-white text-slate-900 antialiased">
+          <div class="print-container">
+            ${clone.innerHTML}
+          </div>
         </body>
       </html>
     `);
@@ -80,7 +130,7 @@ export function PackingListDocumentDialog({ open, onOpenChange, documentData: pr
         setTimeout(() => {
             winPrint.print();
             winPrint.close();
-        }, 250);
+        }, 350);
     };
 
     const { company, documentTitle, header, table, totalLength, totalDrums, footer } = data || {};
