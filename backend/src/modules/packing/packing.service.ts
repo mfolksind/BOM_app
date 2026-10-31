@@ -387,10 +387,15 @@ export class PackingService {
     currentProductId?: string;
     workOrderId?: string;
     customerId?: string;
+    inboundChallanId?: string;
+    refRgpNumber?: string;
     currentWarehouseId?: string;
     search?: string;
   }) {
     const query: Record<string, unknown> = {};
+
+    if (filter.inboundChallanId) query.inboundChallanId = filter.inboundChallanId;
+    if (filter.refRgpNumber) query.refRgpNumber = { $regex: filter.refRgpNumber, $options: 'i' };
 
     if (filter.status) query.status = filter.status;
     if (filter.drumType) query.drumType = filter.drumType;
@@ -646,7 +651,7 @@ export class PackingService {
       const lineDto = dto.lines[i];
       let drum = drumMap.get(lineDto.drumId);
       if (!drum && lineDto.drumNumber) {
-        drum = await DrumModel.findOne({ drumNumber: lineDto.drumNumber });
+        drum = (await DrumModel.findOne({ drumNumber: lineDto.drumNumber })) || undefined;
       }
       if (!drum) continue;
 

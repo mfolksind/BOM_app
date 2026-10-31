@@ -41,6 +41,7 @@ import {
 import { CreateCustomerDialog } from '@/components/customers/create-customer-dialog';
 import { EditCustomerDialog } from '@/components/customers/edit-customer-dialog';
 import { CustomerStockOverviewDialog } from '@/components/customers/customer-stock-overview-dialog';
+import { DataImportModal } from '@/components/shared/data-import-modal';
 
 import {
   Building2,
@@ -58,8 +59,7 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   XCircle,
-  Power,
-  Layers,
+  UploadCloud,
 } from 'lucide-react';
 
 export default function CustomersPage() {
@@ -74,6 +74,7 @@ export default function CustomersPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isLoading, setIsLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedStockCustomer, setSelectedStockCustomer] = useState(null);
   const [customerMode, setCustomerMode] = useState('view');
@@ -147,13 +148,23 @@ export default function CustomersPage() {
           </p>
         </div>
 
-        <Button
-          onClick={() => setCreateOpen(true)}
-          className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="h-10 px-3.5 border-slate-300 text-slate-700 hover:bg-slate-100 font-medium text-sm gap-2 cursor-pointer shadow-xs"
+          >
+            <UploadCloud className="w-4 h-4 text-emerald-600" />
+            Import Customers
+          </Button>
+          <Button
+            onClick={() => setCreateOpen(true)}
+            className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Add Customer
+          </Button>
+        </div>
       </div>
 
       {/* Main Table Card */}
@@ -487,6 +498,14 @@ export default function CustomersPage() {
           onOpenChange={(open) => !open && setSelectedStockCustomer(null)}
         />
       )}
+
+      {/* Bulk Data Import Modal */}
+      <DataImportModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        initialTemplateKey="CUSTOMERS"
+        onSuccess={() => fetchCustomers(1)}
+      />
     </div>
   );
 }

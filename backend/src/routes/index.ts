@@ -76,4 +76,8 @@ router.use('/outbound-challans', outboundChallanRoutes);
 // Global Stock Dashboard, Reports, Reconciliation & Traceability (Prompt 8)
 router.use('/reports', reportRoutes);
 
+// Bulk Historical Data & Master Data Import (Paper Archive Migration)
+import { importRoutes } from '../modules/shared/import.routes';
+router.use('/import', importRoutes);
+
 export const appRouter = router;

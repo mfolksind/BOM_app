@@ -1681,7 +1681,7 @@ export class ProductionService {
       );
       if (calculatedScrapQty <= 0) continue;
 
-      const sourceWarehouseId = dto.sourceWarehouseId || c.warehouseId.toString();
+      const sourceWarehouseId = dto.sourceWarehouseId || c.warehouseId?.toString() || '';
 
       const remainingWip = await this.getRemainingWip({
         workOrderId: batch.workOrderId!,

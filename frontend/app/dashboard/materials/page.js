@@ -40,6 +40,7 @@ import {
 
 import { CreateMaterialDialog } from '@/components/materials/create-material-dialog';
 import { EditMaterialDialog } from '@/components/materials/edit-material-dialog';
+import { DataImportModal } from '@/components/shared/data-import-modal';
 
 import {
   Boxes,
@@ -53,6 +54,7 @@ import {
   Power,
   Pencil,
   Layers,
+  UploadCloud,
 } from 'lucide-react';
 
 const CATEGORY_COLORS = {
@@ -80,6 +82,7 @@ export default function MaterialsPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isLoading, setIsLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState(null);
   const [materialMode, setMaterialMode] = useState('view');
 
@@ -155,13 +158,23 @@ export default function MaterialsPage() {
           </p>
         </div>
 
-        <Button
-          onClick={() => setCreateOpen(true)}
-          className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add Raw Material
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="h-10 px-3.5 border-slate-300 text-slate-700 hover:bg-slate-100 font-medium text-sm gap-2 cursor-pointer shadow-xs"
+          >
+            <UploadCloud className="w-4 h-4 text-emerald-600" />
+            Import Materials
+          </Button>
+          <Button
+            onClick={() => setCreateOpen(true)}
+            className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Add Raw Material
+          </Button>
+        </div>
       </div>
 
       {/* Main Table Card */}
@@ -471,6 +484,14 @@ export default function MaterialsPage() {
         }}
         initialMode={materialMode}
         onSuccess={() => fetchMaterials(pagination.page)}
+      />
+
+      {/* Bulk Data Import Modal */}
+      <DataImportModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        initialTemplateKey="RAW_MATERIALS"
+        onSuccess={() => fetchMaterials(1)}
       />
     </div>
   );

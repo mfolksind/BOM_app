@@ -83,20 +83,23 @@ async function seed() {
     'globalstocksummaries'
   ];
 
-  for (const name of collectionsToClear) {
-    try {
-      await mongoose.connection.db.collection(name).deleteMany({});
-    } catch (e) {
-      // ignore
+  if (mongoose.connection.db) {
+    for (const name of collectionsToClear) {
+      try {
+        await mongoose.connection.db.collection(name).deleteMany({});
+      } catch (e) {
+        // ignore
+      }
     }
   }
   console.log('Cleared all transactional and master data.');
 
   // Ensure default superadmin & admin exist
-  const existingUsers = await mongoose.connection.db.collection('users').countDocuments();
-  if (existingUsers === 0) {
-    const passwordHash = await bcrypt.hash('admin123', 10);
-    await mongoose.connection.db.collection('users').insertOne({
+  if (mongoose.connection.db) {
+    const existingUsers = await mongoose.connection.db.collection('users').countDocuments();
+    if (existingUsers === 0) {
+      const passwordHash = await bcrypt.hash('admin123', 10);
+      await mongoose.connection.db.collection('users').insertOne({
       employeeCode: 'EMP-SA-001',
       email: 'superadmin@mfolks.com',
       passwordHash,
@@ -109,6 +112,7 @@ async function seed() {
       updatedAt: new Date(),
     });
     console.log('Created default Super Admin: superadmin@mfolks.com / admin123');
+    }
   }
 
   // 2. CREATE WAREHOUSES

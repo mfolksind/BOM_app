@@ -33,9 +33,11 @@ import {
     ChevronLeft,
     ChevronRight,
     Pencil,
+    UploadCloud,
 } from "lucide-react";
 import { CreateInboundChallanDialog } from "@/components/inbound/create-challan-dialog";
 import { EditInboundChallanDialog } from "@/components/inbound/edit-challan-dialog";
+import { DataImportModal } from "@/components/shared/data-import-modal";
 
 export default function InboundChallansPage() {
     const { user } = useAuth();
@@ -53,6 +55,7 @@ export default function InboundChallansPage() {
 
     // Dialog states
     const [createOpen, setCreateOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [activeChallanId, setActiveChallanId] = useState(null);
     const [dialogMode, setDialogMode] = useState("view");
@@ -186,13 +189,23 @@ export default function InboundChallansPage() {
                     </p>
                 </div>
 
-                <Button
-                    onClick={() => setCreateOpen(true)}
-                    className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
-                >
-                    <Plus className="w-4 h-4" />
-                    Receive Inbound Material
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        onClick={() => setImportOpen(true)}
+                        className="h-10 px-3.5 border-slate-300 text-slate-700 hover:bg-slate-100 font-medium text-sm gap-2 cursor-pointer shadow-xs"
+                    >
+                        <UploadCloud className="w-4 h-4 text-emerald-600" />
+                        Import Paper Challans
+                    </Button>
+                    <Button
+                        onClick={() => setCreateOpen(true)}
+                        className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm gap-2 cursor-pointer shadow-sm"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Receive Inbound Material
+                    </Button>
+                </div>
             </div>
 
             {/* Main Unified Table Card */}
@@ -530,6 +543,17 @@ export default function InboundChallansPage() {
                 warehouses={warehouses}
                 materials={materials}
                 onSuccess={fetchChallans}
+            />
+
+            {/* Bulk Data Import Modal */}
+            <DataImportModal
+                open={importOpen}
+                onOpenChange={setImportOpen}
+                initialTemplateKey="INBOUND_CHALLANS"
+                onSuccess={() => {
+                    setPage(1);
+                    fetchChallans(1);
+                }}
             />
         </div>
     );

@@ -236,7 +236,7 @@ export class CustomersService {
    * Returns customer raw material balances in warehouse, returnable drums inventory,
    * inbound challans, and outbound delivery challans with consumption sheets.
    */
-  async getCustomerStockOverview(id: string) {
+  async getCustomerStockOverview(id: string): Promise<Record<string, any>> {
     const objectId = this.validateId(id);
     const customer = await CustomerModel.findById(objectId);
     if (!customer) {
@@ -260,7 +260,7 @@ export class CustomersService {
     const drumSummary = {
       totalReceived: drums.length,
       availableEmpty: drums.filter((d) => d.status === 'AVAILABLE').length,
-      packed: drums.filter((d) => d.status === 'PACKED' || d.status === 'IN_USE').length,
+      packed: drums.filter((d) => (d.status as string) === 'PACKED' || (d.status as string) === 'FILLED').length,
       dispatched: drums.filter((d) => d.status === 'DISPATCHED').length,
       damaged: drums.filter((d) => d.status === 'DAMAGED').length,
     };

@@ -27,6 +27,7 @@ import {
   ClipboardList,
   Cog,
   Workflow,
+  UploadCloud,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -140,6 +141,11 @@ const navSections = [
         title: 'Admins & Staff',
         href: '/dashboard/admins',
         icon: ShieldCheck,
+      },
+      {
+        title: 'Data Import Center',
+        href: '/dashboard/import',
+        icon: UploadCloud,
       },
       {
         title: 'Operator Profiles',
