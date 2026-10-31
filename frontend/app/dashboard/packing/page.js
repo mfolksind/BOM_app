@@ -491,7 +491,7 @@ export default function PackingPage() {
                                                         className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-orange-700 hover:border-orange-300"
                                                     >
                                                         <FileText className="w-3.5 h-3.5 text-orange-600" />
-                                                        Packing List (Image 1)
+                                                        Packing List
                                                     </Button>
 
                                                     {/* Step 1 Completion: Finalize DRAFT to PACKED */}

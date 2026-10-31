@@ -908,6 +908,7 @@ export class DispatchService {
       bomItems = workOrder.bomSnapshot.items.map((item: any) => ({
         materialId: item.materialId,
         quantityPerUnit: item.quantityPerUnit,
+        scrapTolerancePercentage: item.scrapTolerancePercentage ?? item.scrapTolerancePercent ?? 0,
         materialName: item.materialName,
         materialCode: item.materialCode,
       }));
@@ -957,7 +958,7 @@ export class DispatchService {
 
     const materialDemands: MaterialDemand[] = [];
 
-    // 1. From BOM items
+    // 1. From BOM items (including scrap factor: total gross requirement = base * (1 + scrap% / 100))
     for (const b of bomItems) {
       const mat = b.materialId as any;
       const matName = mat?.name || b.materialName || 'Raw Material';
@@ -973,6 +974,13 @@ export class DispatchService {
         // Safety guard: no single meter of cable consumes > 50 kg of raw material
         norm = Number((rawNorm / 1000).toFixed(6));
       }
+
+      // Include scrap tolerance / scrap factor in total quantity used per meter
+      const scrapPct = Number(b.scrapTolerancePercentage || mat?.scrapTolerancePercentage || 0);
+      if (scrapPct > 0) {
+        norm = Number((norm * (1 + scrapPct / 100)).toFixed(6));
+      }
+
       const cost = mat?.standardCost || 100;
 
       const mId = mat?._id?.toString() || b.materialId?.toString();
@@ -1112,6 +1120,12 @@ export class DispatchService {
           // If a challan has already been fully depleted in earlier advices (availInThis <= 0, thisAdviceInThis === 0, balanceQty === 0),
           // do not show it on the sheet/export.
           if (earlierUsedInThis >= origQty && thisAdviceInThis === 0 && balanceQty === 0) {
+            continue;
+          }
+
+          // If a new/available challan was NOT used at all (neither earlier nor under this advice),
+          // do not show it on the sheet/export.
+          if (earlierUsedInThis === 0 && thisAdviceInThis === 0) {
             continue;
           }
 
