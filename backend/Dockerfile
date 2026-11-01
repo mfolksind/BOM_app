@@ -1,41 +1,57 @@
 # ==============================================================================
-# Multi-stage Dockerfile for Cable Manufacturing Job-Work ERP Backend
-# Node.js 22 Alpine for minimal footprint, speed, and security
+# Ultra-Optimized Multi-Stage Dockerfile for Express + TypeScript Backend
+# Using Alpine Linux + Corepack pnpm + Non-root Security
 # ==============================================================================
 
-# Stage 1: Base image
+# Stage 1: Base image with Corepack pnpm
 FROM node:22-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable pnpm && apk add --no-cache libc6-compat
 WORKDIR /app
-RUN apk add --no-cache libc6-compat
-COPY package*.json ./
 
-# Stage 2: Development stage (used by docker-compose for local dev)
-FROM base AS development
-ENV NODE_ENV=development
-RUN npm install
-COPY . .
-EXPOSE 5000
-CMD ["npm", "run", "dev"]
+# Stage 2: Dependencies installation with BuildKit cache mounts
+FROM base AS dependencies
+COPY package.json pnpm-lock.yaml* ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    if [ -f pnpm-lock.yaml ]; then \
+      pnpm install --frozen-lockfile; \
+    else \
+      pnpm install; \
+    fi
 
-# Stage 3: Builder stage (compiles TypeScript to JavaScript)
+# Stage 3: Builder stage (transpiles TypeScript to dist/)
 FROM base AS builder
-ENV NODE_ENV=development
-RUN npm install
-COPY . .
-RUN npm run build
-RUN npm prune --production
+COPY package.json pnpm-lock.yaml* tsconfig.json ./
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY src ./src
+RUN pnpm run build
 
-# Stage 4: Production stage (lean production runtime)
-FROM node:22-alpine AS production
+# Stage 4: Production dependencies only
+FROM base AS prod-dependencies
+COPY package.json pnpm-lock.yaml* ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    if [ -f pnpm-lock.yaml ]; then \
+      pnpm install --prod --frozen-lockfile; \
+    else \
+      pnpm install --prod; \
+    fi
+
+# Stage 5: Production Lean Runner Image (~140MB)
+FROM node:22-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV=production
 
-# Run with non-privileged node user for security
+ENV NODE_ENV=production
+ENV PORT=5000
+
+# Security: Dedicated unprivileged node user
 USER node
 
-COPY --chown=node:node package*.json ./
-COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+# Copy only production dependencies and compiled artifacts
+COPY --chown=node:node package.json ./
+COPY --chown=node:node --from=prod-dependencies /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/dist ./dist
 
 EXPOSE 5000
+
 CMD ["node", "dist/server.js"]
