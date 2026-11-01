@@ -1,24 +1,20 @@
 # ==============================================================================
 # Ultra-Optimized Multi-Stage Dockerfile for Express + TypeScript Backend
-# Using Alpine Linux + Corepack pnpm + Non-root Security
+# Using Alpine Linux + pnpm + Non-root Security
 # ==============================================================================
 
-# Stage 1: Base image with Corepack pnpm
+# Stage 1: Base image with pnpm
 FROM node:22-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable pnpm && apk add --no-cache libc6-compat
+RUN npm install -g pnpm@10 && apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Stage 2: Dependencies installation with BuildKit cache mounts
 FROM base AS dependencies
 COPY package.json pnpm-lock.yaml* ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    if [ -f pnpm-lock.yaml ]; then \
-      pnpm install --frozen-lockfile; \
-    else \
-      pnpm install; \
-    fi
+    pnpm install --no-frozen-lockfile
 
 # Stage 3: Builder stage (transpiles TypeScript to dist/)
 FROM base AS builder
@@ -31,11 +27,7 @@ RUN pnpm run build
 FROM base AS prod-dependencies
 COPY package.json pnpm-lock.yaml* ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    if [ -f pnpm-lock.yaml ]; then \
-      pnpm install --prod --frozen-lockfile; \
-    else \
-      pnpm install --prod; \
-    fi
+    pnpm install --prod --no-frozen-lockfile
 
 # Stage 5: Production Lean Runner Image (~140MB)
 FROM node:22-alpine AS runner
