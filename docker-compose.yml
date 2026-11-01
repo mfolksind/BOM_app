@@ -71,7 +71,7 @@ services:
         container_name: bom_server
         restart: unless-stopped
         env_file:
-            - bom_server.env
+            - bom.env
         volumes:
             - bom_server_public:/app/public
         depends_on:
