@@ -236,7 +236,7 @@ export class WorkOrdersController {
     try {
       const result = await workOrdersService.completeWorkOrder(
         req.params.id,
-        req.body?.force,
+        req.body?.force !== undefined ? req.body.force : true,
         req.body?.remarks,
         req.user?._id?.toString(),
       );

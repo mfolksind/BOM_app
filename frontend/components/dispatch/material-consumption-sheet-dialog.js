@@ -15,7 +15,6 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [isReturningScrap, setIsReturningScrap] = useState(false);
 
     // Helper to group columns so all challans of the same product/material appear adjacent to each other
     const groupColumnsByMaterial = (cols) => {
@@ -36,47 +35,7 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
         return grouped;
     };
 
-    // Toggle returning scrap for customer
-    const handleToggleReturnScrap = (returning) => {
-        setIsReturningScrap(returning);
-        setData((prev) => {
-            if (!prev || !Array.isArray(prev.columns)) return prev;
-            const next = JSON.parse(JSON.stringify(prev));
-            next.columns = next.columns.map((col) => {
-                const rate =
-                    col.unitRate || (col.originallyReceived?.qty > 0 ? col.originallyReceived.value / col.originallyReceived.qty : 100);
-                const netQty = col.netQuantity?.qty || 0;
-                const earlierQty = col.qtyUsedEarlier?.qty || 0;
-                const thisAdviceQty = col.qtyUsedThisAdvice?.qty || 0;
 
-                let returnQty = 0;
-                if (returning) {
-                    if (Number(col.scrapQuantity || 0) > 0) {
-                        returnQty = Number(col.scrapQuantity);
-                    } else {
-                        // scrap percentage calculation from total used quantity (gross = net * (1 + scrapPct/100))
-                        const scrapPct = Number(col.scrapPercentage || 2.5);
-                        returnQty = Number((thisAdviceQty * (scrapPct / (100 + scrapPct))).toFixed(2));
-                    }
-                }
-
-                const returnVal = Number((returnQty * rate).toFixed(2));
-                // Balance in hand is the remaining unused raw material in parent factory's challan:
-                // Net Quantity - Earlier Used - This Advice.
-                // Qty Return represents the scrap generated from this advice returned back to the customer.
-                const balQty = Number((netQty - earlierQty - thisAdviceQty).toFixed(2));
-                const balVal = Number((balQty * rate).toFixed(2));
-
-                return {
-                    ...col,
-                    qtyReturn: { qty: returnQty, value: returnVal },
-                    balanceInHand: { qty: balQty, value: balVal },
-                };
-            });
-            return next;
-        });
-        toast.info(returning ? "Scrap Return enabled: showing returned scrap quantities" : "Scrap Return disabled: return quantities set to 0");
-    };
 
     useEffect(() => {
         if (open) {
@@ -86,8 +45,6 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                     columns: groupColumnsByMaterial(initialData.columns),
                 };
                 setData(sorted);
-                const hasReturn = sorted.columns?.some((c) => Number(c.qtyReturn?.qty || 0) > 0);
-                setIsReturningScrap(Boolean(hasReturn));
             } else if (challanId) {
                 fetchSheetData();
             }
@@ -96,7 +53,6 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                 setData(null);
             }
             setIsEditing(false);
-            setIsReturningScrap(false);
         }
     }, [open, challanId, initialData]);
 
@@ -110,8 +66,6 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                     sheetData.columns = groupColumnsByMaterial(sheetData.columns);
                 }
                 setData(sheetData);
-                const hasReturn = sheetData.columns?.some((c) => Number(c.qtyReturn?.qty || 0) > 0);
-                setIsReturningScrap(Boolean(hasReturn));
             }
         } catch (err) {
             toast.error(err.message || "Failed to load Material Consumption Sheet");
@@ -150,7 +104,6 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
             col.netQuantity = { qty: netQty, value: netVal };
 
             // Balance In Hand = Net Quantity - Earlier Used - This Advice (allows negative if over-consumed)
-            // (Note: This Advice already accounts for the total material consumed including scrap, so returnQty must NOT be deducted again)
             const earlierQty = col.qtyUsedEarlier?.qty || 0;
             const thisAdviceQty = col.qtyUsedThisAdvice?.qty || 0;
             const returnQty = col.qtyReturn?.qty || 0;
@@ -408,34 +361,7 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
-                        {/* Scrap Return Option */}
-                        <div className="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700 text-xs">
-                            <span className="text-slate-300 font-medium">Return Scrap to Customer:</span>
-                            <div className="flex items-center gap-1">
-                                <button
-                                    type="button"
-                                    onClick={() => handleToggleReturnScrap(false)}
-                                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
-                                        !isReturningScrap
-                                            ? "bg-slate-700 text-white shadow-xs"
-                                            : "text-slate-400 hover:text-slate-200"
-                                    }`}
-                                >
-                                    No (0 Qty)
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleToggleReturnScrap(true)}
-                                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
-                                        isReturningScrap
-                                            ? "bg-emerald-600 text-white shadow-xs"
-                                            : "text-slate-400 hover:text-slate-200"
-                                    }`}
-                                >
-                                    Yes (Show Return)
-                                </button>
-                            </div>
-                        </div>
+
 
                         <Button
                             type="button"
@@ -871,7 +797,7 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                                             <td className="border border-slate-900 p-1 text-left font-bold pl-2 text-amber-950">
                                                 Qty. Used under this Advice (In Kgs &amp; Mtr)
                                                 <span className="block text-[9px] text-amber-800 font-normal">
-                                                    (Total used quantity including scrap)
+                                                    (Total used quantity)
                                                 </span>
                                             </td>
                                             {columns?.map((c, i) => (
@@ -931,7 +857,7 @@ export function MaterialConsumptionSheetDialog({ open, onOpenChange, challanId, 
                                             <td className="border border-slate-900 p-1 text-left font-medium pl-2 text-slate-700">
                                                 Qty. Return (Kgs)
                                                 <span className="block text-[9px] text-slate-500">
-                                                    {isReturningScrap ? "(Scrap returning to customer)" : "(0.00 - Scrap not returning)"}
+                                                    (0.00)
                                                 </span>
                                             </td>
                                             {columns?.map((c, i) => (

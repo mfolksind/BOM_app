@@ -8,7 +8,6 @@ import { InventoryBalanceModel } from '../inventory/inventory-balance.model';
 import { OutboundChallanModel } from '../dispatch/outbound-challan.model';
 import { DispatchModel } from '../dispatch/dispatch.model';
 import { DrumModel } from '../packing/drum.model';
-import { ScrapRecordModel } from '../production/scrap-record.model';
 import { AuditLogModel } from '../shared/audit-log.model';
 import {
   CreateCustomerInput,
@@ -485,184 +484,7 @@ export class CustomersService {
       .sort({ challanDate: -1, createdAt: -1 })
       .limit(50);
 
-    // 5. Customer Scrap & Process Waste Records (Work Order & Challan Wise)
-    const customerWorkOrders = await WorkOrderModel.find({ customerId: objectId })
-      .select('_id workOrderNumber inboundChallanId inboundChallanNumber cableName cableSpecification status')
-      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate')
-      .lean();
-    const customerWorkOrderIds = customerWorkOrders.map((wo) => wo._id);
-    const workOrderMap = new Map<string, any>(
-      customerWorkOrders.map((wo) => [wo._id.toString(), wo]),
-    );
-
-    const scrapRecords = await ScrapRecordModel.find({
-      $or: [
-        { customerId: objectId },
-        { workOrderId: { $in: customerWorkOrderIds } },
-      ],
-    })
-      .populate('materialId', 'code name baseUnit category standardCost')
-      .populate({
-        path: 'workOrderId',
-        select: 'workOrderNumber inboundChallanId inboundChallanNumber cableName cableSpecification status',
-        populate: {
-          path: 'inboundChallanId',
-          select: 'challanNumber customerChallanNumber customerChallanDate',
-        },
-      })
-      .populate({
-        path: 'lotId',
-        select: 'lotNumber supplierLotNumber inboundChallanId',
-        populate: {
-          path: 'inboundChallanId',
-          select: 'challanNumber customerChallanNumber customerChallanDate',
-        },
-      })
-      .populate('processStageId', 'name code')
-      .populate('sourceWarehouseId', 'code name type')
-      .populate('scrapWarehouseId', 'code name type')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Enrich scrap records with resolved Work Order & Challan
-    for (const s of scrapRecords) {
-      const wo = s.workOrderId as any;
-      const lot = s.lotId as any;
-      const woDetails = wo?._id ? workOrderMap.get(wo._id.toString()) : null;
-
-      const challanRef =
-        wo?.inboundChallanId?.customerChallanNumber ||
-        wo?.inboundChallanNumber ||
-        woDetails?.inboundChallanId?.customerChallanNumber ||
-        woDetails?.inboundChallanNumber ||
-        lot?.inboundChallanId?.customerChallanNumber ||
-        wo?.inboundChallanId?.challanNumber ||
-        'Direct / General Inward';
-
-      const challanDate =
-        wo?.inboundChallanId?.customerChallanDate ||
-        woDetails?.inboundChallanId?.customerChallanDate ||
-        lot?.inboundChallanId?.customerChallanDate ||
-        null;
-
-      (s as any).resolvedChallanNumber = challanRef;
-      (s as any).resolvedChallanDate = challanDate;
-      (s as any).resolvedWorkOrderNumber =
-        wo?.workOrderNumber || woDetails?.workOrderNumber || 'Unassigned WO';
-      (s as any).resolvedCableSpec =
-        wo?.cableSpecification || woDetails?.cableSpecification || '';
-    }
-
-    // Work Order Wise Scrap Breakdown
-    const scrapByWoMap = new Map<string, any>();
-    for (const s of scrapRecords) {
-      const woNum = (s as any).resolvedWorkOrderNumber;
-      const woId = (s.workOrderId as any)?._id?.toString() || woNum;
-      if (!scrapByWoMap.has(woId)) {
-        scrapByWoMap.set(woId, {
-          workOrderId: woId,
-          workOrderNumber: woNum,
-          challanNumber: (s as any).resolvedChallanNumber,
-          challanDate: (s as any).resolvedChallanDate,
-          cableSpecification: (s as any).resolvedCableSpec || '',
-          totalScrapKg: 0,
-          recordsCount: 0,
-          materialBreakdown: new Map<string, { materialName: string; materialCode: string; totalKg: number; unit: string }>(),
-          records: [],
-        });
-      }
-      const woGroup = scrapByWoMap.get(woId);
-      woGroup.totalScrapKg += s.scrapQuantity || 0;
-      woGroup.recordsCount += 1;
-      woGroup.records.push(s);
-
-      const mat = s.materialId as any;
-      const mKey = mat?._id?.toString() || 'unknown';
-      const mExisting = woGroup.materialBreakdown.get(mKey) || {
-        materialName: mat?.name || 'Unknown Material',
-        materialCode: mat?.code || '-',
-        totalKg: 0,
-        unit: s.unit || 'KG',
-      };
-      mExisting.totalKg += s.scrapQuantity || 0;
-      woGroup.materialBreakdown.set(mKey, mExisting);
-    }
-
-    const scrapByWorkOrder = Array.from(scrapByWoMap.values()).map((wo) => ({
-      ...wo,
-      totalScrapKg: Number(wo.totalScrapKg.toFixed(2)),
-      materials: Array.from(wo.materialBreakdown.values()).map((m: any) => ({
-        ...m,
-        totalKg: Number(m.totalKg.toFixed(2)),
-      })),
-      materialBreakdown: undefined,
-    }));
-
-    // Challan Wise Scrap Breakdown
-    const scrapByChallanMap = new Map<string, any>();
-    for (const s of scrapRecords) {
-      const chNum = (s as any).resolvedChallanNumber;
-      if (!scrapByChallanMap.has(chNum)) {
-        scrapByChallanMap.set(chNum, {
-          challanNumber: chNum,
-          challanDate: (s as any).resolvedChallanDate,
-          workOrders: new Set<string>(),
-          totalScrapKg: 0,
-          recordsCount: 0,
-          materialBreakdown: new Map<string, { materialName: string; materialCode: string; totalKg: number; unit: string }>(),
-          records: [],
-        });
-      }
-      const chGroup = scrapByChallanMap.get(chNum);
-      chGroup.totalScrapKg += s.scrapQuantity || 0;
-      chGroup.recordsCount += 1;
-      chGroup.workOrders.add((s as any).resolvedWorkOrderNumber);
-      chGroup.records.push(s);
-
-      const mat = s.materialId as any;
-      const mKey = mat?._id?.toString() || 'unknown';
-      const mExisting = chGroup.materialBreakdown.get(mKey) || {
-        materialName: mat?.name || 'Unknown Material',
-        materialCode: mat?.code || '-',
-        totalKg: 0,
-        unit: s.unit || 'KG',
-      };
-      mExisting.totalKg += s.scrapQuantity || 0;
-      chGroup.materialBreakdown.set(mKey, mExisting);
-    }
-
-    const scrapByChallan = Array.from(scrapByChallanMap.values()).map((ch) => ({
-      ...ch,
-      workOrders: Array.from(ch.workOrders),
-      totalScrapKg: Number(ch.totalScrapKg.toFixed(2)),
-      materials: Array.from(ch.materialBreakdown.values()).map((m: any) => ({
-        ...m,
-        totalKg: Number(m.totalKg.toFixed(2)),
-      })),
-      materialBreakdown: undefined,
-    }));
-
-    // Scrap Summary by Material
-    const totalScrapKg = scrapRecords.reduce((acc, curr) => acc + (curr.scrapQuantity || 0), 0);
-    const scrapByMaterialMap = new Map<string, { materialName: string; materialCode: string; totalKg: number; unit: string }>();
-    for (const s of scrapRecords) {
-      const mat = s.materialId as any;
-      const key = mat?._id?.toString() || 'unknown';
-      const existing = scrapByMaterialMap.get(key) || {
-        materialName: mat?.name || 'Unknown Material',
-        materialCode: mat?.code || '-',
-        totalKg: 0,
-        unit: s.unit || 'KG',
-      };
-      existing.totalKg += s.scrapQuantity || 0;
-      scrapByMaterialMap.set(key, existing);
-    }
-    const scrapMaterialBreakdown = Array.from(scrapByMaterialMap.values()).map((v) => ({
-      ...v,
-      totalKg: Number(v.totalKg.toFixed(2)),
-    }));
-
-    // 6. Total Material Stock KG & Value
+    // 5. Total Material Stock KG & Value
     const totalStockKg = materialBalances.reduce((acc, curr) => acc + (curr.quantityOnHand || 0), 0);
     const totalAvailableKg = materialBalances.reduce(
       (acc, curr) => acc + (curr.quantityAvailable || 0),
@@ -695,8 +517,6 @@ export class CustomersService {
         drumSummary,
         inboundChallanCount: inboundChallans.length,
         outboundChallanCount: outboundChallans.length,
-        totalScrapKg: Number(totalScrapKg.toFixed(2)),
-        scrapRecordsCount: scrapRecords.length,
       },
       rawMaterialStock,
       warehouseBreakdown,
@@ -704,13 +524,6 @@ export class CustomersService {
       drums,
       inboundChallans,
       outboundChallans,
-      scrapSummary: {
-        totalScrapKg: Number(totalScrapKg.toFixed(2)),
-        materialBreakdown: scrapMaterialBreakdown,
-      },
-      scrapRecords,
-      scrapByWorkOrder,
-      scrapByChallan,
     };
   }
 }

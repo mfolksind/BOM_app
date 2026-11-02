@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import {
   Table,
   TableBody,
@@ -73,6 +74,7 @@ export function CreatePackingListDialog({
   const [allYardDrums, setAllYardDrums] = useState([]);
   const [availableDrums, setAvailableDrums] = useState([]);
   const [useAllYardDrums, setUseAllYardDrums] = useState(false);
+  const [existingPackingLists, setExistingPackingLists] = useState([]);
   const [selectedRgp, setSelectedRgp] = useState('ALL');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
@@ -114,6 +116,18 @@ export function CreatePackingListDialog({
     return '';
   };
 
+  // Set of work order IDs that are already utilized in a packing list
+  const packedWorkOrderIds = useMemo(() => {
+    const set = new Set();
+    (existingPackingLists || []).forEach((pl) => {
+      const woId = pl.workOrderId?._id || pl.workOrderId;
+      if (woId && pl.status !== 'CANCELLED') {
+        set.add(String(woId));
+      }
+    });
+    return set;
+  }, [existingPackingLists]);
+
   // Active pool of drums (either customer-filtered or all yard drums)
   const activeDrumsPool = useMemo(() => {
     if (useAllYardDrums) return allYardDrums;
@@ -141,24 +155,81 @@ export function CreatePackingListDialog({
   const isRgpExhausted =
     selectedRgp !== 'ALL' && drumsForRgp.length > 0 && remainingDrumsForRgp.length === 0;
 
-  // Filtered work orders by selected customer
+  // Filtered work orders: ONLY show COMPLETED work orders that haven't been utilized yet to make a packing list
   const filteredWorkOrders = useMemo(() => {
     if (!Array.isArray(workOrders)) return [];
-    if (!selectedCustomerId || selectedCustomerId === 'ALL') return workOrders;
     return workOrders.filter((wo) => {
-      const cid = getCustId(wo.customerId);
-      return String(cid) === String(selectedCustomerId);
+      // Must be COMPLETED (case-insensitive & trimmed)
+      const st = String(wo.status || '').trim().toUpperCase();
+      if (st !== 'COMPLETED') return false;
+
+      // Cannot be already utilized to make an active packing list
+      if (packedWorkOrderIds.has(String(wo._id))) return false;
+
+      // Customer filter
+      if (selectedCustomerId && selectedCustomerId !== 'ALL') {
+        const cid = getCustId(wo.customerId);
+        if (String(cid) !== String(selectedCustomerId)) return false;
+      }
+
+      return true;
     });
+  }, [workOrders, selectedCustomerId, packedWorkOrderIds]);
+
+  // Count of total completed work orders before packing list exclusion
+  const completedWorkOrdersCount = useMemo(() => {
+    if (!Array.isArray(workOrders)) return 0;
+    return workOrders.filter((wo) => {
+      const st = String(wo.status || '').trim().toUpperCase();
+      if (st !== 'COMPLETED') return false;
+      if (selectedCustomerId && selectedCustomerId !== 'ALL') {
+        const cid = getCustId(wo.customerId);
+        if (String(cid) !== String(selectedCustomerId)) return false;
+      }
+      return true;
+    }).length;
   }, [workOrders, selectedCustomerId]);
+
+  const customerOptions = useMemo(() => {
+    const list = [
+      {
+        value: 'ALL',
+        label: 'All Customers',
+        code: `${allYardDrums.length} empty drums`,
+      },
+    ];
+    (customers || []).forEach((c) => {
+      const count = allYardDrums.filter(
+        (d) => String(getCustId(d.customerId)) === String(c._id),
+      ).length;
+      list.push({
+        value: String(c._id),
+        label: c.name,
+        code: c.code || 'CUST',
+        subLabel: `${count} yard drums available`,
+      });
+    });
+    return list;
+  }, [customers, allYardDrums]);
+
+  const workOrderOptions = useMemo(() => {
+    return (filteredWorkOrders || []).map((wo) => ({
+      value: String(wo._id),
+      label: wo.workOrderNumber,
+      code: wo.status ? `[${wo.status}]` : (wo.productId?.code || ''),
+      subLabel: `${wo.customerId?.name || 'Customer'} • ${(wo.orderedLengthMeters || wo.plannedLengthMeters || 0).toLocaleString()} m`,
+    }));
+  }, [filteredWorkOrders]);
 
   // Load masters & yard drums when dialog opens
   const loadInitialData = async () => {
     setIsLoadingOrders(true);
     try {
-      const [woRes, custRes, drumRes] = await Promise.all([
+      const [woRes, custRes, drumRes, plRes] = await Promise.all([
         apiClient('/work-orders?limit=100'),
         apiClient('/customers?limit=100'),
         apiClient('/drums?limit=200'),
+        apiClient('/packing-lists?limit=200'),
       ]);
 
       const woList =
@@ -171,9 +242,13 @@ export function CreatePackingListDialog({
       const drumList = Array.isArray(drumRes?.data)
         ? drumRes.data
         : drumRes?.data?.items || drumRes?.data?.drums || [];
+      const plList = Array.isArray(plRes?.data)
+        ? plRes.data
+        : plRes?.data?.items || plRes?.data?.packingLists || [];
 
       setWorkOrders(woList);
       setCustomers(custList);
+      setExistingPackingLists(plList);
 
       // Prioritize empty / available yard drums
       const emptyYardDrums = drumList.filter(
@@ -184,14 +259,21 @@ export function CreatePackingListDialog({
       const targetCust = defaultCustomerId || 'ALL';
       setSelectedCustomerId(targetCust);
 
+      const packedSet = new Set(
+        plList.filter((p) => p.status !== 'CANCELLED').map((p) => String(p.workOrderId?._id || p.workOrderId))
+      );
+      const eligibleWoList = woList.filter(
+        (w) => w.status === 'COMPLETED' && !packedSet.has(String(w._id))
+      );
+
       // If defaultWorkOrderId is passed, select it
       let initialWo = null;
       if (defaultWorkOrderId) {
-        initialWo = woList.find((w) => String(w._id) === String(defaultWorkOrderId));
+        initialWo = eligibleWoList.find((w) => String(w._id) === String(defaultWorkOrderId));
       } else if (targetCust !== 'ALL') {
-        initialWo = woList.find((w) => String(getCustId(w.customerId)) === String(targetCust));
-      } else if (woList.length > 0) {
-        initialWo = woList[0];
+        initialWo = eligibleWoList.find((w) => String(getCustId(w.customerId)) === String(targetCust));
+      } else if (eligibleWoList.length > 0) {
+        initialWo = eligibleWoList[0];
       }
 
       if (initialWo) {
@@ -622,178 +704,157 @@ MFolks Cable Division`;
         >
           <div className="flex flex-col h-full overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80 shrink-0">
+            <div className="px-6 py-5 border-b border-slate-100 bg-white shrink-0">
               <SheetHeader className="p-0">
                 <div className="flex items-center gap-3">
-                  <span className="p-2.5 bg-orange-50 text-orange-700 rounded-xl border border-orange-200">
+                  <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
                     <Package className="w-5 h-5" />
-                  </span>
+                  </div>
                   <div>
-                    <SheetTitle className="text-xl font-bold text-slate-900">
-                      Pack Cable into Drums &amp; Generate Packing List
+                    <SheetTitle className="text-base font-semibold text-slate-900">
+                      Create Packing List
                     </SheetTitle>
                     <SheetDescription className="text-xs text-slate-500">
-                      Select Customer &amp; Work Order, allocate customer returnable empty drums from yard, and pack cables.
+                      Allocate cable lengths to yard drums and finalize packing
                     </SheetDescription>
                   </div>
                 </div>
               </SheetHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-slate-50">
-              {/* Header Metadata matching Image 1 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-slate-50/50">
+              {/* Header Metadata */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-white p-4 rounded-xl border border-slate-200">
                 {/* 1. Filter by Customer Company */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Customer Company *
+                  <Label className="text-xs font-medium text-slate-700">
+                    Customer *
                   </Label>
-                  <Select
-                    value={selectedCustomerId}
-                    onValueChange={handleCustomerFilterChange}
-                  >
-                    <SelectTrigger className="h-10 text-xs bg-slate-50 w-full min-w-0 overflow-hidden truncate flex items-center justify-between">
-                      <SelectValue placeholder="All Companies">
-                        {(() => {
-                          if (selectedCustomerId === 'ALL') return 'All Companies';
-                          const cust = customers.find((c) => String(c._id) === String(selectedCustomerId));
-                          return cust ? `${cust.name} (${cust.code || 'CUST'})` : 'Select Company...';
-                        })()}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60">
-                      <SelectItem value="ALL" className="text-xs font-medium">
-                        All Companies ({allYardDrums.length} empty drums in yard)
-                      </SelectItem>
-                      {customers.map((c) => {
-                        const count = allYardDrums.filter(
-                          (d) => String(getCustId(d.customerId)) === String(c._id),
-                        ).length;
-                        return (
-                          <SelectItem key={c._id} value={c._id} className="text-xs">
-                            {c.name} ({count} empty drums)
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={customerOptions}
+                    value={selectedCustomerId || 'ALL'}
+                    onChange={(val) => handleCustomerFilterChange(val)}
+                    placeholder="All Customers"
+                    searchPlaceholder="Search customer by name or code..."
+                    className="h-9 text-xs bg-white w-full"
+                  />
                 </div>
 
-                {/* 2. Select Work Order with single-line truncation to avoid label overlap */}
+                {/* 2. Select Work Order */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Select Work Order / PO *
+                  <Label className="text-xs font-medium text-slate-700 flex items-center justify-between">
+                    <span>Work Order *</span>
+                    {filteredWorkOrders.length > 0 && (
+                      <span className="text-[10px] text-emerald-600 font-normal">
+                        {filteredWorkOrders.length} available to pack
+                      </span>
+                    )}
                   </Label>
-                  <Select
+                  <SearchableSelect
+                    options={workOrderOptions}
                     value={selectedWorkOrder?._id || ''}
-                    onValueChange={(woId) => {
+                    onChange={(woId) => {
                       const wo = workOrders.find((w) => String(w._id) === String(woId));
                       if (wo) handleSelectWorkOrderWithDrums(wo);
                     }}
-                    disabled={isLoadingOrders}
-                  >
-                    <SelectTrigger className="h-10 text-xs bg-slate-50 w-full min-w-0 overflow-hidden truncate flex items-center justify-between">
-                      <SelectValue placeholder="Choose Work Order...">
-                        {selectedWorkOrder && (
-                          <span className="truncate block overflow-hidden text-ellipsis whitespace-nowrap max-w-[240px] text-xs font-semibold text-slate-900">
-                            {selectedWorkOrder.workOrderNumber} — {selectedWorkOrder.customerId?.name || 'Customer'} ({(selectedWorkOrder.orderedLengthMeters || selectedWorkOrder.plannedLengthMeters || 0).toLocaleString()} m)
-                          </span>
-                        )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {filteredWorkOrders.map((wo) => (
-                        <SelectItem key={wo._id} value={wo._id} className="text-xs py-2">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="font-semibold text-slate-900">
-                              {wo.workOrderNumber} — {wo.customerId?.name || 'Customer'}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              Length: {(wo.orderedLengthMeters || wo.plannedLengthMeters || 0).toLocaleString()} m {wo.productId?.code ? `• ${wo.productId.code}` : ''}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder={
+                      isLoadingOrders
+                        ? "Loading work orders..."
+                        : filteredWorkOrders.length === 0
+                        ? (completedWorkOrdersCount > 0
+                            ? "All completed WOs are already packed"
+                            : "No completed WOs found")
+                        : "Choose Work Order..."
+                    }
+                    emptyMessage={
+                      completedWorkOrdersCount > 0
+                        ? "All completed work orders for this customer are already packed into packing lists"
+                        : "No completed work orders available for packing"
+                    }
+                    searchPlaceholder="Search by WO # or cable..."
+                    disabled={isLoadingOrders || filteredWorkOrders.length === 0}
+                    className="h-9 text-xs bg-white w-full"
+                  />
+                  {filteredWorkOrders.length === 0 && !isLoadingOrders && (
+                    <p className="text-[11px] text-amber-600 leading-tight">
+                      {completedWorkOrdersCount > 0
+                        ? `All ${completedWorkOrdersCount} completed work order(s) are already packed into packing lists.`
+                        : "Only work orders marked as 'COMPLETED' appear here for packing into drums."}
+                    </p>
+                  )}
                 </div>
 
-                {/* 3. Cable Size (SIZE) */}
+                {/* 3. Cable Size */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">Cable Size (SIZE) *</Label>
+                  <Label className="text-xs font-medium text-slate-700">Cable Size *</Label>
                   <Input
                     value={sizeDescription}
                     onChange={(e) => setSizeDescription(e.target.value)}
                     placeholder="e.g. 4CX35 SQMM A2XFY"
-                    className="h-10 text-xs font-mono font-semibold"
+                    className="h-9 text-xs font-mono uppercase"
                   />
                 </div>
 
                 {/* 4. Packing List No */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Packing List No (PACKING NO.)
+                  <Label className="text-xs font-medium text-slate-700">
+                    Packing List No.
                   </Label>
                   <Input
                     value={packingNumber}
                     onChange={(e) => setPackingNumber(e.target.value)}
                     placeholder="e.g. MF/PL/408"
-                    className="h-10 text-xs font-mono"
+                    className="h-9 text-xs font-mono uppercase"
                   />
                 </div>
 
                 {/* 5. Invoice No */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">Invoice No (INVOICE NO.)</Label>
+                  <Label className="text-xs font-medium text-slate-700">Invoice No.</Label>
                   <Input
                     value={invoiceNumber}
                     onChange={(e) => setInvoiceNumber(e.target.value)}
                     placeholder="e.g. 2026-27/RJ/JW/337"
-                    className="h-10 text-xs font-mono"
+                    className="h-9 text-xs font-mono"
                   />
                 </div>
 
                 {/* 6. Challan Ref No */}
                 <div className="space-y-1.5 min-w-0">
-                  <Label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Challan Ref No (CHALLAN NO.)
+                  <Label className="text-xs font-medium text-slate-700">
+                    Challan Ref No.
                   </Label>
                   <Input
                     value={challanNumber}
                     onChange={(e) => setChallanNumber(e.target.value)}
                     placeholder="e.g. MF/DC/408"
-                    className="h-10 text-xs font-mono"
+                    className="h-9 text-xs font-mono"
                   />
                 </div>
               </div>
 
-              {/* Drum Auto-Allocation Assistant Engine */}
+              {/* Drum Allocation Assistant */}
               {selectedWorkOrder && (
-                <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-indigo-50 p-4 rounded-xl border border-orange-200/80 shadow-xs space-y-3">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="p-2 bg-orange-600 text-white rounded-lg shadow-xs">
-                        <Sparkles className="w-4 h-4" />
-                      </span>
-                      <div>
-                        <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                          Customer Drum Auto-Allocation Assistant
-                        </h3>
-                        <p className="text-[11px] text-slate-600">
-                          Calculates required drums from PO planned length and customer yard stock, then distributes lengths automatically.
-                        </p>
-                      </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-900">
+                        Allocation Assistant
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Automatically split target length into available drums
+                      </p>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
                       <Button
                         type="button"
                         size="sm"
                         onClick={() => handleAutoAllocateDrums(false)}
-                        className="h-8 text-xs font-semibold gap-1.5 bg-orange-600 hover:bg-orange-700 text-white shadow-xs cursor-pointer"
+                        className="h-8 text-xs font-medium gap-1.5 bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
                       >
                         <Calculator className="w-3.5 h-3.5" />
-                        Auto-Allocate Drums
+                        Auto-Allocate
                       </Button>
 
                       <Button
@@ -801,180 +862,146 @@ MFolks Cable Division`;
                         variant="outline"
                         size="sm"
                         onClick={() => handleAutoAllocateDrums(true)}
-                        className="h-8 text-xs font-medium gap-1.5 border-orange-300 text-orange-800 bg-white hover:bg-orange-100/50 cursor-pointer"
+                        className="h-8 text-xs font-medium gap-1.5 bg-white text-slate-700 cursor-pointer"
                       >
                         <FileText className="w-3.5 h-3.5" />
-                        Load Scanned Sample (1,997 m)
+                        Sample (1,997 m)
                       </Button>
                     </div>
                   </div>
 
                   {/* Metrics Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-orange-200/60">
-                    <div className="bg-white/80 p-2.5 rounded-lg border border-orange-200/60">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase block">
-                        Target PO Length
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-slate-100">
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">
+                        Target Length
                       </span>
-                      <div className="text-base font-bold font-mono text-slate-900 mt-0.5">
+                      <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
                         {targetPoLength.toLocaleString()} m
                       </div>
-                      <span className="text-[10px] text-slate-500 block">From selected Work Order</span>
                     </div>
 
-                    <div className="bg-white/80 p-2.5 rounded-lg border border-orange-200/60">
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase block">
-                          Customer Drums in Yard
+                        <span className="text-[10px] font-medium text-slate-500 uppercase block">
+                          Drums in Yard
                         </span>
                         {allYardDrums.length > availableDrums.length && (
                           <button
                             type="button"
                             onClick={() => setUseAllYardDrums(!useAllYardDrums)}
-                            className="text-[9px] text-indigo-700 hover:underline font-semibold cursor-pointer"
+                            className="text-[9px] text-indigo-600 hover:underline font-medium cursor-pointer"
                           >
-                            {useAllYardDrums ? 'Customer Only' : `All Yard (${allYardDrums.length})`}
+                            {useAllYardDrums ? 'Customer' : 'All Yard'}
                           </button>
                         )}
                       </div>
-                      <div className="text-base font-bold font-mono text-slate-900 mt-0.5 flex items-center gap-1.5">
-                        {drumsForRgp.length} empty
-                        {drumsForRgp.length > 0 && (
-                          <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-700 border-slate-300 py-0 font-mono">
-                            {selectedRgp !== 'ALL' ? `RGP: ${selectedRgp}` : (useAllYardDrums ? 'All Yard' : 'Customer Yard')}
-                          </Badge>
-                        )}
+                      <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
+                        {drumsForRgp.length} available
                       </div>
-                      <span className="text-[10px] text-slate-500 block">
-                        {selectedRgp !== 'ALL'
-                          ? `${remainingDrumsForRgp.length} unallocated`
-                          : 'Received on Inbound Challan'}
-                      </span>
                     </div>
 
-                    <div className="bg-white/80 p-2.5 rounded-lg border border-orange-200/60">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase block">
-                        Capacity Per Drum
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">
+                        Capacity / Drum
                       </span>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1 mt-0.5">
                         <Input
                           type="number"
                           min="1"
                           step="50"
                           value={drumCapacityMeters}
                           onChange={(e) => setDrumCapacityMeters(e.target.value)}
-                          className="h-7 w-28 text-xs font-mono font-bold bg-white px-2.5 border-orange-300 focus:border-orange-500"
+                          className="h-6 w-20 text-xs font-mono font-medium bg-white px-2 border-slate-200"
                         />
-                        <span className="text-xs font-mono text-slate-600 font-medium">meters</span>
+                        <span className="text-xs text-slate-500">m</span>
                       </div>
-                      <span className="text-[10px] text-slate-500 block">Standard cut capacity</span>
                     </div>
 
-                    <div className="bg-white/80 p-2.5 rounded-lg border border-orange-200/60">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase block">
-                        Drums Required
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <span className="text-[10px] font-medium text-slate-500 uppercase block">
+                        Drums Needed
                       </span>
-                      <div className="text-base font-bold font-mono text-indigo-700 mt-0.5">
+                      <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
                         {estimatedDrumsNeeded} drums
                       </div>
-                      <span className="text-[10px] text-slate-500 block font-mono">
-                        Math.ceil({targetPoLength} / {capacity})
-                      </span>
                     </div>
                   </div>
 
-                  {/* RGP-Wise Drum Selection Bar */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 bg-orange-100/50 rounded-lg border border-orange-200 text-xs">
+                  {/* RGP Selection Bar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 bg-slate-50 rounded-lg border border-slate-100 text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-orange-950">Customer RGP Batch:</span>
+                      <span className="text-xs text-slate-600">RGP Batch:</span>
                       <Select value={selectedRgp} onValueChange={setSelectedRgp}>
-                        <SelectTrigger className="h-7 text-xs bg-white border-orange-300 w-56 font-mono">
+                        <SelectTrigger className="h-7 text-xs bg-white border-slate-200 w-52 font-mono">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="ALL" className="text-xs">
-                            All RGPs ({activeDrumsPool.length} empty drums)
+                            All RGPs ({activeDrumsPool.length} drums)
                           </SelectItem>
                           {uniqueRgps.map((rgp) => {
                             const count = activeDrumsPool.filter((d) => d.refRgpNumber === rgp).length;
                             return (
                               <SelectItem key={rgp} value={rgp} className="text-xs font-mono">
-                                RGP: {rgp} ({count} in yard)
+                                RGP: {rgp} ({count})
                               </SelectItem>
                             );
                           })}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="text-[11px] text-orange-900 font-mono">
+                    <div className="text-[11px] text-slate-500 font-mono">
                       {selectedRgp !== 'ALL' ? (
                         <span>
-                          RGP #{selectedRgp}: <strong>{remainingDrumsForRgp.length}</strong> available / {drumsForRgp.length} total
+                          RGP #{selectedRgp}: {remainingDrumsForRgp.length} available of {drumsForRgp.length}
                         </span>
                       ) : (
                         <span>
-                          Total Available in Yard: <strong>{activeDrumsPool.length}</strong>
+                          Total Available: {activeDrumsPool.length}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* DRUM SHORTAGE BANNER & ASK MORE DRUMS ACTION */}
+                  {/* DRUM SHORTAGE BANNER */}
                   {isDrumShortage && (
-                    <div className="p-3.5 bg-amber-50/95 border border-amber-300 rounded-xl space-y-2.5 text-xs shadow-xs">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <div className="flex items-start gap-2.5">
-                          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                          <div>
-                            <p className="font-bold text-amber-950 text-sm">
-                              Drum Shortage Detected: Need {shortageDrumsCount} more drum{shortageDrumsCount > 1 ? 's' : ''} from {customerName}
-                            </p>
-                            <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-                              Order requires <strong>{estimatedDrumsNeeded} drums</strong> ({targetPoLength.toLocaleString()} m at ~{capacity}m/drum), but the factory yard currently has <strong>{availableInYardCount} empty returnable drum(s)</strong> available for {customerName}.
-                            </p>
-                            <p className="text-[11px] text-amber-900 font-medium mt-0.5">
-                              Recommended Action: Save this packing list in <strong>Draft</strong> and ask {customerName} to send additional drums under Inbound Challan / RGP.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => setRequestDrumsModalOpen(true)}
-                            className="h-8 text-xs font-semibold gap-1.5 bg-amber-700 hover:bg-amber-800 text-white shadow-xs cursor-pointer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            Ask More Drums from Company
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSubmit(false)}
-                            className="h-8 text-xs font-semibold gap-1.5 border-amber-400 bg-white hover:bg-amber-100 text-amber-900 cursor-pointer"
-                          >
-                            <Clock className="w-3.5 h-3.5 text-amber-700" />
-                            Save as Draft
-                          </Button>
-                        </div>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span className="text-amber-900 font-medium">
+                          Shortage: Order needs {shortageDrumsCount} more drum{shortageDrumsCount > 1 ? 's' : ''} from {customerName}.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setRequestDrumsModalOpen(true)}
+                          className="h-7 text-xs bg-white border-amber-300 text-amber-900 hover:bg-amber-100 cursor-pointer"
+                        >
+                          Request from Customer
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleSubmit(false)}
+                          className="h-7 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+                        >
+                          Save Draft
+                        </Button>
                       </div>
                     </div>
                   )}
 
-                  {/* RGP Exhaustion Alert Banner */}
+                  {/* RGP Exhaustion Alert */}
                   {isRgpExhausted && (
-                    <div className="flex items-start justify-between gap-3 text-xs bg-rose-50 border border-rose-300 text-rose-800 p-3 rounded-xl shadow-xs">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-                        <div>
-                          <p className="font-bold text-rose-950">
-                            Customer Drums Exhausted for RGP #{selectedRgp}
-                          </p>
-                          <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
-                            All returnable drums under RGP #{selectedRgp} have been allocated. Please request more drums from the customer via Inbound RGP Challan, or save this packing list as <strong>Draft</strong>.
-                          </p>
-                        </div>
+                    <div className="flex items-center justify-between gap-3 text-xs bg-rose-50 border border-rose-200 text-rose-800 p-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                        <span>All drums under RGP #{selectedRgp} allocated.</span>
                       </div>
                       <Button
                         type="button"
@@ -982,55 +1009,49 @@ MFolks Cable Division`;
                         variant="outline"
                         disabled={isSubmitting}
                         onClick={() => handleSubmit(false)}
-                        className="h-7 text-xs border-rose-300 bg-white text-rose-800 hover:bg-rose-100 font-semibold shrink-0 cursor-pointer"
+                        className="h-7 text-xs border-rose-300 bg-white text-rose-800 hover:bg-rose-100 cursor-pointer"
                       >
-                        Save as Draft
+                        Save Draft
                       </Button>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Drum Table Lines (Image 1 Structure) */}
+              {/* Drum Table Lines */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                 <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                   <div>
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-orange-600" />
-                      Drum Packing Allocation Table
+                    <h3 className="text-xs font-semibold text-slate-800">
+                      Drums Allocation
                     </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Allocate customer empty drums received on Ref RGP, length top/bottom, and dimensions.
-                    </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAddLine}
-                      className="h-8 text-xs gap-1.5 border-orange-200 text-orange-700 hover:bg-orange-50 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add Drum Row
-                    </Button>
-                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddLine}
+                    className="h-7 text-xs gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Row
+                  </Button>
                 </div>
 
                 <Table>
-                  <TableHeader className="bg-slate-100/70 border-b border-slate-200">
+                  <TableHeader className="bg-slate-50 border-b border-slate-200">
                     <TableRow>
-                      <TableHead className="w-12 text-center text-xs font-bold text-slate-700">S.NO</TableHead>
-                      <TableHead className="w-48 text-xs font-bold text-slate-700">D.NO (Drum #) *</TableHead>
-                      <TableHead className="w-28 text-right text-xs font-bold text-slate-700">LENGTH BOTTOM</TableHead>
-                      <TableHead className="w-28 text-right text-xs font-bold text-slate-700">LENGTH TOP</TableHead>
-                      <TableHead className="w-28 text-right text-xs font-bold text-slate-700">LENGTH TOTAL</TableHead>
-                      <TableHead className="w-32 text-xs font-bold">DRUM SIZE</TableHead>
-                      <TableHead className="w-32 text-xs font-bold">Ref RGP No</TableHead>
-                      <TableHead className="w-28 text-xs font-bold">TYPE</TableHead>
-                      <TableHead className="w-32 text-xs font-bold">REMARK</TableHead>
-                      <TableHead className="w-12 text-center text-xs font-bold"></TableHead>
+                      <TableHead className="w-12 text-center text-xs font-medium text-slate-600">#</TableHead>
+                      <TableHead className="w-44 text-xs font-medium text-slate-600">Drum No. *</TableHead>
+                      <TableHead className="w-24 text-right text-xs font-medium text-slate-600">Bottom (m)</TableHead>
+                      <TableHead className="w-24 text-right text-xs font-medium text-slate-600">Top (m)</TableHead>
+                      <TableHead className="w-24 text-right text-xs font-medium text-slate-600">Total (m)</TableHead>
+                      <TableHead className="w-28 text-xs font-medium text-slate-600">Size</TableHead>
+                      <TableHead className="w-28 text-xs font-medium text-slate-600">Ref RGP</TableHead>
+                      <TableHead className="w-24 text-xs font-medium text-slate-600">Type</TableHead>
+                      <TableHead className="w-28 text-xs font-medium text-slate-600">Remarks</TableHead>
+                      <TableHead className="w-10 text-center"></TableHead>
                     </TableRow>
                   </TableHeader>
 
@@ -1210,66 +1231,52 @@ MFolks Cable Division`;
             </div>
 
             {/* Dialog Footer Actions */}
-            <div className="p-4 border-t border-slate-200 bg-white flex items-center justify-between shrink-0">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => onOpenChange(false)}
-                className="text-xs cursor-pointer"
+                className="text-xs h-9 cursor-pointer"
               >
                 Cancel
               </Button>
 
-              <div className="flex items-center gap-2.5">
-                {/* If shortage, highlight Draft & Ask Drums */}
-                {isDrumShortage ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isSubmitting}
-                      onClick={() => setRequestDrumsModalOpen(true)}
-                      className="text-xs border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <Send className="w-3.5 h-3.5 text-amber-700" />
-                      Ask More Drums from Company
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isSubmitting}
-                      onClick={() => handleSubmit(false)}
-                      className="text-xs border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer"
-                    >
-                      <Clock className="w-3.5 h-3.5 text-slate-600" />
-                      Save as Draft Packing List
-                    </Button>
-                  </>
-                ) : (
+              <div className="flex items-center gap-2">
+                {isDrumShortage && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     disabled={isSubmitting}
-                    onClick={() => handleSubmit(false)}
-                    className="text-xs border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    onClick={() => setRequestDrumsModalOpen(true)}
+                    className="text-xs h-9 border-amber-300 text-amber-900 bg-amber-50/50 hover:bg-amber-100/80 cursor-pointer"
                   >
-                    Save as Draft Packing List
+                    <Send className="w-3.5 h-3.5 mr-1 text-amber-700" />
+                    Request Drums
                   </Button>
                 )}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={() => handleSubmit(false)}
+                  className="text-xs h-9 cursor-pointer bg-white"
+                >
+                  Save Draft
+                </Button>
 
                 <Button
                   type="button"
                   disabled={isSubmitting}
                   size="sm"
                   onClick={() => handleSubmit(true)}
-                  className="text-xs bg-orange-600 hover:bg-orange-700 text-white font-semibold gap-1.5 shadow-xs cursor-pointer"
+                  className="text-xs h-9 bg-slate-900 hover:bg-slate-800 text-white font-medium gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  {isSubmitting ? 'Saving & Packing...' : 'Pack & Finalize Drums (Ready for Challan)'}
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {isSubmitting ? 'Packing...' : 'Finalize & Pack'}
                 </Button>
               </div>
             </div>
@@ -1279,18 +1286,18 @@ MFolks Cable Division`;
 
       {/* DRUM SHORTAGE: ASK MORE DRUMS FROM COMPANY DIALOG */}
       <Dialog open={requestDrumsModalOpen} onOpenChange={setRequestDrumsModalOpen}>
-        <DialogContent className="max-w-2xl bg-white p-6 rounded-2xl shadow-2xl border border-slate-200">
+        <DialogContent className="max-w-lg bg-white p-6 rounded-xl shadow-xl border border-slate-200">
           <DialogHeader>
             <div className="flex items-center gap-2.5">
-              <div className="p-2.5 bg-amber-100 text-amber-800 rounded-xl">
-                <Send className="w-5 h-5" />
+              <div className="p-2 rounded-lg bg-amber-50 text-amber-800">
+                <Send className="w-4 h-4" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-bold text-slate-900">
-                  Request Additional Drums from {customerName}
+                <DialogTitle className="text-base font-semibold text-slate-900">
+                  Request Additional Drums
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500">
-                  Work Order requires more drums than currently in yard. Send request &amp; save packing list in Draft.
+                  {customerName} needs to supply +{shortageDrumsCount} drums to complete this order
                 </DialogDescription>
               </div>
             </div>
@@ -1299,21 +1306,21 @@ MFolks Cable Division`;
           <div className="space-y-4 my-2">
             {/* Quick Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase block">Target PO Length</span>
-                <span className="text-sm font-bold font-mono text-slate-900">{targetPoLength.toLocaleString()} m</span>
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <span className="text-[10px] font-medium text-slate-500 uppercase block">Target Length</span>
+                <span className="text-xs font-semibold font-mono text-slate-900">{targetPoLength.toLocaleString()} m</span>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase block">Required Drums</span>
-                <span className="text-sm font-bold font-mono text-slate-900">{estimatedDrumsNeeded} drums</span>
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <span className="text-[10px] font-medium text-slate-500 uppercase block">Required</span>
+                <span className="text-xs font-semibold font-mono text-slate-900">{estimatedDrumsNeeded} drums</span>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase block">Available in Yard</span>
-                <span className="text-sm font-bold font-mono text-emerald-700">{availableInYardCount} empty</span>
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <span className="text-[10px] font-medium text-slate-500 uppercase block">In Yard</span>
+                <span className="text-xs font-semibold font-mono text-emerald-700">{availableInYardCount} drums</span>
               </div>
-              <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-300">
-                <span className="text-[10px] font-semibold text-amber-700 uppercase block">Shortage to Request</span>
-                <span className="text-sm font-bold font-mono text-rose-700">+{shortageDrumsCount} drums</span>
+              <div className="p-2 bg-amber-50 rounded-lg border border-amber-200">
+                <span className="text-[10px] font-medium text-amber-700 uppercase block">Shortage</span>
+                <span className="text-xs font-semibold font-mono text-rose-700">+{shortageDrumsCount} drums</span>
               </div>
             </div>
 

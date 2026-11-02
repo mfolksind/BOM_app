@@ -33,7 +33,6 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
       {
         materialId: '',
         quantityPerUnit: '',
-        scrapTolerancePercentage: 0,
         stageSequence: 1,
         notes: '',
       },
@@ -74,7 +73,6 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
         {
           materialId: '',
           quantityPerUnit: '',
-          scrapTolerancePercentage: 0,
           stageSequence: prev.items.length + 1,
           notes: '',
         },
@@ -145,7 +143,6 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
         items: formData.items.map((itm) => ({
           materialId: itm.materialId,
           quantityPerUnit: parseFloat(itm.quantityPerUnit),
-          scrapTolerancePercentage: parseFloat(itm.scrapTolerancePercentage) || 0,
           stageSequence: parseInt(itm.stageSequence, 10) || 1,
           notes: itm.notes?.trim() || undefined,
           isMandatory: true,
@@ -172,7 +169,6 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
           {
             materialId: '',
             quantityPerUnit: '',
-            scrapTolerancePercentage: 0,
             stageSequence: 1,
             notes: '',
           },
@@ -377,7 +373,7 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
                         />
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2.5">
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider truncate block">
                             Norm Qty {selectedMat ? `(${selectedMat.baseUnit})` : ''} *
@@ -391,22 +387,6 @@ export function CreateBomDialog({ open, onOpenChange, onSuccess }) {
                             onChange={(e) => handleItemChange(index, 'quantityPerUnit', e.target.value)}
                             className="h-9 text-xs bg-white font-medium"
                             required
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider truncate block">
-                            Scrap %
-                          </Label>
-                          <Input
-                            type="number"
-                            step="any"
-                            min="0"
-                            max="100"
-                            placeholder="0"
-                            value={item.scrapTolerancePercentage}
-                            onChange={(e) => handleItemChange(index, 'scrapTolerancePercentage', e.target.value)}
-                            className="h-9 text-xs bg-white"
                           />
                         </div>
 

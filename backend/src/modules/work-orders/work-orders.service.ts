@@ -80,6 +80,54 @@ export class WorkOrdersService {
       throw new BadRequestError('Specified BOM version does not belong to the selected product');
     }
 
+    // Enforce customer inbound challan material restriction:
+    // If customer has no material in total across all their inbound challans, work order cannot be created
+    const customerChallans = await InboundChallanModel.find({
+      customerId: customer._id,
+      status: { $ne: 'CANCELLED' },
+    });
+
+    if (!customerChallans || customerChallans.length === 0) {
+      throw new BadRequestError(
+        `Cannot create Work Order: Selected customer '${customer.name}' has no inbound challans recorded. Work order cannot be created for this customer requirement without inbound material challans.`,
+      );
+    }
+
+    const challanIds = customerChallans.map((c) => c._id);
+    const challanLines = await InboundChallanLineModel.find({
+      inboundChallanId: { $in: challanIds },
+    });
+
+    const totalInboundQuantity = challanLines.reduce(
+      (sum, l) => sum + (l.receivedQuantity || l.declaredQuantity || 0),
+      0,
+    );
+
+    if (totalInboundQuantity <= 0) {
+      throw new BadRequestError(
+        `Cannot create Work Order: Selected customer '${customer.name}' has no material in total across all their inbound challans (total received quantity is 0). Work order cannot be created for this customer requirement.`,
+      );
+    }
+
+    // Check remaining customer inventory balance across lots / warehouse
+    const customerLots = await MaterialLotModel.find({
+      customerId: customer._id,
+      ownerType: 'CUSTOMER',
+    });
+    const totalRemainingLots = customerLots.reduce((sum, l) => sum + (l.currentBalance || 0), 0);
+
+    const customerBalances = await InventoryBalanceModel.find({
+      customerId: customer._id,
+      ownerType: 'CUSTOMER',
+    });
+    const totalCustomerOnHand = customerBalances.reduce((sum, b) => sum + (b.quantityOnHand || 0), 0);
+
+    if (totalRemainingLots <= 0 && totalCustomerOnHand <= 0) {
+      throw new BadRequestError(
+        `Cannot create Work Order: Selected customer '${customer.name}' has no material remaining in total across all their inbound challans (current inventory balance is 0). Work order cannot be created for this customer requirement.`,
+      );
+    }
+
     // Enforce customer stock restriction: verify customer has sufficient stock before creating work order
     const preview = await this.previewMaterialAvailability({
       bomVersionId: dto.bomVersionId,
@@ -233,7 +281,8 @@ export class WorkOrdersService {
       .populate('bomVersionId', 'bomNumber versionNumber status batchSize outputUnit')
       .populate('createdBy', 'firstName lastName email')
       .populate('confirmedBy', 'firstName lastName email')
-      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber');
+      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber')
+      .populate('inboundChallanIds', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber');
 
     if (!workOrder) {
       throw new NotFoundError(`Work order with ID '${id}' not found`);
@@ -933,12 +982,60 @@ export class WorkOrdersService {
     );
 
     let autoAllocatedChallans: any = null;
+    let customerInboundSummary: any = null;
     if (dto.customerId) {
       const requirements = availability.map((a) => ({
         materialId: a.materialId,
         plannedQuantity: a.requiredQuantity,
       }));
       autoAllocatedChallans = await this.findAutoAllocatedChallans(dto.customerId, requirements, true);
+
+      // Summarize customer's inbound challan materials
+      const custChallans = await InboundChallanModel.find({
+        customerId: dto.customerId,
+        status: { $ne: 'CANCELLED' },
+      });
+      const cIds = custChallans.map((c) => c._id);
+      const lines = await InboundChallanLineModel.find({ inboundChallanId: { $in: cIds } });
+      const totalInboundQuantity = lines.reduce(
+        (sum, l) => sum + (l.receivedQuantity || l.declaredQuantity || 0),
+        0,
+      );
+
+      const custLots = await MaterialLotModel.find({
+        customerId: dto.customerId,
+        ownerType: 'CUSTOMER',
+      });
+      const totalRemainingLots = custLots.reduce((sum, l) => sum + (l.currentBalance || 0), 0);
+
+      const custBals = await InventoryBalanceModel.find({
+        customerId: dto.customerId,
+        ownerType: 'CUSTOMER',
+      });
+      const totalOnHand = custBals.reduce((sum, b) => sum + (b.quantityOnHand || 0), 0);
+      const totalRemaining = Math.max(totalRemainingLots, totalOnHand);
+
+      let hasInboundMaterial = true;
+      let reason = '';
+
+      if (custChallans.length === 0) {
+        hasInboundMaterial = false;
+        reason = 'Selected customer has no inbound challans recorded.';
+      } else if (totalInboundQuantity <= 0) {
+        hasInboundMaterial = false;
+        reason = 'Customer inbound challans have 0 total received material.';
+      } else if (totalRemaining <= 0) {
+        hasInboundMaterial = false;
+        reason = 'Customer has 0 remaining material balance across all inbound challans in inventory.';
+      }
+
+      customerInboundSummary = {
+        totalChallans: custChallans.length,
+        totalInboundQuantity: Number(totalInboundQuantity.toFixed(4)),
+        totalRemainingStock: Number(totalRemaining.toFixed(4)),
+        hasInboundMaterial,
+        reason,
+      };
     }
 
     return {
@@ -948,6 +1045,7 @@ export class WorkOrdersService {
       isFullySufficient: availability.every((a) => a.isSufficient),
       materials: availability,
       autoAllocatedChallans,
+      customerInboundSummary,
     };
   }
 
@@ -1259,22 +1357,209 @@ export class WorkOrdersService {
       );
     }
 
-    workOrder.status = 'COMPLETED';
-    if (remarks)
-      workOrder.remarks = workOrder.remarks ? `${workOrder.remarks}; ${remarks}` : remarks;
-    await workOrder.save();
+    return TransactionUtil.runInTransaction(async (session) => {
+      // 1. Unfreeze all active reservations tied to this work order and deduct from customer's inventory balance & lots
+      const activeReservations = await MaterialReservationModel.find({
+        workOrderId: workOrder._id,
+        status: 'ACTIVE',
+      }).session(session);
 
-    if (userId) {
-      await InventoryAuditUtil.record({
-        action: 'UPDATE',
-        entityType: 'WorkOrder',
-        entityId: workOrder._id,
-        performedBy: userId,
-        newValues: { status: 'COMPLETED', force, remarks },
-      });
-    }
+      const deductedByMaterial = new Map<string, number>();
 
-    return workOrder;
+      for (const res of activeReservations) {
+        const qty = res.reservedQuantity;
+        if (qty > 0) {
+          // Decrement both reserved AND on-hand inventory balance for the customer
+          // (unfreezing the reservation and removing the consumed quantity from the client's inventory)
+          const bal = await InventoryBalanceModel.findOne({
+            materialId: res.materialId,
+            warehouseId: res.warehouseId,
+            ownerType: 'CUSTOMER',
+            customerId: res.customerId || workOrder.customerId,
+            ...(res.lotId ? { lotId: res.lotId } : {}),
+          }).session(session);
+
+          if (bal) {
+            const decReserved = Math.min(bal.quantityReserved, qty);
+            const decOnHand = Math.min(bal.quantityOnHand, qty);
+            bal.quantityReserved = Math.max(0, bal.quantityReserved - decReserved);
+            bal.quantityOnHand = Math.max(0, bal.quantityOnHand - decOnHand);
+            bal.quantityAvailable = Math.max(0, bal.quantityOnHand - bal.quantityReserved);
+            await bal.save({ session });
+          } else {
+            // Fallback: find any customer balance for this material
+            const anyBal = await InventoryBalanceModel.findOne({
+              materialId: res.materialId,
+              ownerType: 'CUSTOMER',
+              customerId: res.customerId || workOrder.customerId,
+            }).session(session);
+            if (anyBal) {
+              const decReserved = Math.min(anyBal.quantityReserved, qty);
+              const decOnHand = Math.min(anyBal.quantityOnHand, qty);
+              anyBal.quantityReserved = Math.max(0, anyBal.quantityReserved - decReserved);
+              anyBal.quantityOnHand = Math.max(0, anyBal.quantityOnHand - decOnHand);
+              anyBal.quantityAvailable = Math.max(0, anyBal.quantityOnHand - anyBal.quantityReserved);
+              await anyBal.save({ session });
+            }
+          }
+
+          // Also deduct from MaterialLot if lotId is set or find active lot for this customer & material
+          let lotDeducted = false;
+          if (res.lotId) {
+            const lot = await MaterialLotModel.findById(res.lotId).session(session);
+            if (lot) {
+              lot.currentBalance = Math.max(0, (lot.currentBalance || 0) - qty);
+              await lot.save({ session });
+              lotDeducted = true;
+            }
+          }
+
+          if (!lotDeducted) {
+            // Fallback: Deduct from customer's active lots for this material
+            const customerLots = await MaterialLotModel.find({
+              materialId: res.materialId,
+              ownerType: 'CUSTOMER',
+              customerId: res.customerId || workOrder.customerId,
+              currentBalance: { $gt: 0 },
+            }).session(session);
+
+            let lotNeeded = qty;
+            for (const lot of customerLots) {
+              if (lotNeeded <= 0) break;
+              const takeLot = Math.min(lot.currentBalance, lotNeeded);
+              lot.currentBalance = Math.max(0, lot.currentBalance - takeLot);
+              await lot.save({ session });
+              lotNeeded -= takeLot;
+            }
+          }
+
+          // Record consumption transaction
+          const txnNumber = await InventorySequenceUtil.getNextSequence(
+            'INVENTORY_TRANSACTION',
+            'TXN',
+            session,
+          );
+          await InventoryTransactionModel.create(
+            [
+              {
+                transactionNumber: txnNumber,
+                movementType: 'OUTWARD',
+                transactionType: 'ISSUE_TO_PRODUCTION',
+                materialId: res.materialId,
+                warehouseId: res.warehouseId,
+                lotId: res.lotId || null,
+                ownerType: 'CUSTOMER',
+                customerId: res.customerId || workOrder.customerId,
+                quantity: qty,
+                unit: res.unit,
+                status: 'POSTED',
+                sourceDocumentType: 'MATERIAL_CONSUMPTION',
+                sourceDocumentId: workOrder._id,
+                postedAt: new Date(),
+                postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+                remarks: `Stock unfrozen and consumed on Work Order ${workOrder.workOrderNumber} completion`,
+              },
+            ],
+            { session },
+          );
+
+          // Mark reservation fulfilled
+          res.status = 'FULFILLED';
+          res.releasedAt = new Date();
+          if (userId) res.releasedBy = new mongoose.Types.ObjectId(userId);
+          await res.save({ session });
+
+          const matKey = res.materialId.toString();
+          deductedByMaterial.set(matKey, (deductedByMaterial.get(matKey) || 0) + qty);
+        }
+      }
+
+      // 2. If any planned materials were not reserved (or partially reserved), deduct remaining planned quantities from customer's inventory & lots
+      const { requirements } = await this.getMaterialRequirements(workOrder._id.toString());
+      for (const req of requirements) {
+        const matKey = req.materialId.toString();
+        const alreadyDeducted = deductedByMaterial.get(matKey) || 0;
+        const remainingToDeduct = Math.max(0, req.plannedQuantity - alreadyDeducted);
+
+        if (remainingToDeduct > 0) {
+          // Find customer balances for this material
+          const customerBalances = await InventoryBalanceModel.find({
+            materialId: req.materialId,
+            ownerType: 'CUSTOMER',
+            customerId: workOrder.customerId,
+            quantityOnHand: { $gt: 0 },
+          }).session(session);
+
+          let needed = remainingToDeduct;
+          for (const bal of customerBalances) {
+            if (needed <= 0) break;
+            const take = Math.min(bal.quantityOnHand, needed);
+            bal.quantityOnHand = Math.max(0, bal.quantityOnHand - take);
+            bal.quantityReserved = Math.max(0, bal.quantityReserved - Math.min(bal.quantityReserved, take));
+            bal.quantityAvailable = Math.max(0, bal.quantityOnHand - bal.quantityReserved);
+            await bal.save({ session });
+
+            if (bal.lotId) {
+              const lot = await MaterialLotModel.findById(bal.lotId).session(session);
+              if (lot) {
+                lot.currentBalance = Math.max(0, (lot.currentBalance || 0) - take);
+                await lot.save({ session });
+              }
+            }
+
+            needed -= take;
+          }
+
+          // Deduct from customer's material lots for the unreserved planned consumption
+          const customerLots = await MaterialLotModel.find({
+            materialId: req.materialId,
+            ownerType: 'CUSTOMER',
+            customerId: workOrder.customerId,
+            currentBalance: { $gt: 0 },
+          }).session(session);
+
+          let lotNeeded = remainingToDeduct;
+          for (const lot of customerLots) {
+            if (lotNeeded <= 0) break;
+            const takeLot = Math.min(lot.currentBalance, lotNeeded);
+            lot.currentBalance = Math.max(0, lot.currentBalance - takeLot);
+            await lot.save({ session });
+            lotNeeded -= takeLot;
+          }
+        }
+      }
+
+      // 3. Remove/clean up customer inventory balance entries that are completely zeroed out (0 on hand and 0 reserved)
+      await InventoryBalanceModel.deleteMany({
+        ownerType: 'CUSTOMER',
+        customerId: workOrder.customerId,
+        quantityOnHand: { $lte: 0 },
+        quantityReserved: { $lte: 0 },
+      }).session(session);
+
+      // 4. Update Work Order status to COMPLETED
+      const woDoc = await WorkOrderModel.findById(workOrder._id).session(session);
+      if (!woDoc) throw new NotFoundError('Work order not found');
+
+      woDoc.status = 'COMPLETED';
+      woDoc.deliveredLengthMeters = woDoc.deliveredLengthMeters || woDoc.orderedLengthMeters;
+      if (remarks) {
+        woDoc.remarks = woDoc.remarks ? `${woDoc.remarks}; ${remarks}` : remarks;
+      }
+      await woDoc.save({ session });
+
+      if (userId) {
+        await InventoryAuditUtil.record({
+          action: 'UPDATE',
+          entityType: 'WorkOrder',
+          entityId: woDoc._id,
+          performedBy: userId,
+          newValues: { status: 'COMPLETED', force, remarks, materialsUnfrozenAndConsumed: true },
+        });
+      }
+
+      return woDoc;
+    });
   }
 
   /**

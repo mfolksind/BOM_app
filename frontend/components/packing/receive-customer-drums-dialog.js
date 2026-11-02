@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { toast } from 'sonner';
 import { Package, Plus, Trash2, Truck, ClipboardList, CheckCircle2, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -260,18 +261,18 @@ export function ReceiveCustomerDrumsDialog({
       >
         <form onSubmit={handleSubmit} className="flex flex-col h-full overflow-hidden">
           {/* Header */}
-          <div className="px-6 py-5 border-b border-orange-500/20 bg-gradient-to-r from-orange-600 to-amber-600 text-white shrink-0">
+          <div className="px-6 py-5 border-b border-slate-100 bg-white shrink-0">
             <SheetHeader className="p-0">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-white/20 rounded-xl backdrop-blur-xs">
-                  <Package className="w-6 h-6 text-white" />
+                <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
+                  <Package className="w-5 h-5" />
                 </div>
                 <div>
-                  <SheetTitle className="text-lg font-bold text-white">
-                    Receive Customer Drums (Inbound Challan / RGP)
+                  <SheetTitle className="text-base font-semibold text-slate-900">
+                    Receive Customer Drums
                   </SheetTitle>
-                  <SheetDescription className="text-xs text-orange-100 mt-0.5">
-                    Record returnable empty cable drums sent by customer with delivery challan / gate pass.
+                  <SheetDescription className="text-xs text-slate-500">
+                    Log empty drums received from customer under Returnable Gate Pass (RGP)
                   </SheetDescription>
                 </div>
               </div>
@@ -280,45 +281,39 @@ export function ReceiveCustomerDrumsDialog({
 
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {/* Challan & Customer Meta */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700">Sending Customer *</Label>
-                <Select value={customerId} onValueChange={setCustomerId}>
-                  <SelectTrigger className="bg-white text-xs h-9">
-                    <SelectValue placeholder="Select Customer">
-                      {(() => {
-                        const c = (Array.isArray(localCustomers) ? localCustomers : []).find(
-                          (item) => String(item._id) === String(customerId),
-                        );
-                        return c ? `${c.name} (${c.code || 'CUST'})` : undefined;
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Array.isArray(localCustomers) ? localCustomers : []).map((c) => (
-                      <SelectItem key={c._id} value={c._id} className="text-xs">
-                        {c.name} ({c.code || 'CUST'})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-medium text-slate-700">Customer *</Label>
+                <SearchableSelect
+                  options={(Array.isArray(localCustomers) ? localCustomers : []).map((c) => ({
+                    value: c._id,
+                    label: c.name,
+                    code: c.code || 'CUST',
+                    subLabel: c.phone || c.email || '',
+                  }))}
+                  value={customerId}
+                  onChange={setCustomerId}
+                  placeholder="Select Customer"
+                  searchPlaceholder="Search customer by name or code..."
+                  className="bg-white text-xs h-9"
+                />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700">
-                  Customer Challan / Ref RGP No. *
+                <Label className="text-xs font-medium text-slate-700">
+                  Challan / RGP No. *
                 </Label>
                 <Input
                   value={customerChallanNumber}
                   onChange={(e) => setCustomerChallanNumber(e.target.value)}
-                  placeholder="e.g. 262740872"
-                  className="bg-white text-xs h-9 font-mono font-bold"
+                  placeholder="e.g. RGP-2627-01"
+                  className="bg-white text-xs h-9 font-mono uppercase"
                   required
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700">Challan / RGP Date *</Label>
+                <Label className="text-xs font-medium text-slate-700">Challan Date *</Label>
                 <Input
                   type="date"
                   value={customerChallanDate}
@@ -329,56 +324,49 @@ export function ReceiveCustomerDrumsDialog({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700">Receiving Warehouse / Yard *</Label>
-                <Select value={warehouseId} onValueChange={setWarehouseId}>
-                  <SelectTrigger className="bg-white text-xs h-9">
-                    <SelectValue placeholder="Select Warehouse">
-                      {(() => {
-                        const w = (Array.isArray(localWarehouses) ? localWarehouses : []).find(
-                          (item) => String(item._id) === String(warehouseId),
-                        );
-                        return w ? `${w.name} (${w.code || 'WH'})` : undefined;
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Array.isArray(localWarehouses) ? localWarehouses : []).map((w) => (
-                      <SelectItem key={w._id} value={w._id} className="text-xs">
-                        {w.name} ({w.code || 'WH'})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-medium text-slate-700">Receiving Warehouse *</Label>
+                <SearchableSelect
+                  options={(Array.isArray(localWarehouses) ? localWarehouses : []).map((w) => ({
+                    value: w._id,
+                    label: w.name,
+                    code: w.code || 'WH',
+                    subLabel: w.type || 'Warehouse',
+                  }))}
+                  value={warehouseId}
+                  onChange={setWarehouseId}
+                  placeholder="Select Warehouse"
+                  searchPlaceholder="Search warehouse..."
+                  className="bg-white text-xs h-9"
+                />
               </div>
             </div>
 
-            {/* Core 2 Fields as Requested */}
-            <div className="p-4 bg-orange-50/50 rounded-xl border border-orange-200 space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-orange-200">
-                <div className="flex items-center gap-2 text-xs font-bold text-orange-950 uppercase tracking-wide">
-                  <Layers className="w-4 h-4 text-orange-600" />
-                  <span>Drums Inward (Size &amp; Quantity)</span>
-                </div>
-                <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-orange-200 text-[11px]">
+            {/* Drums Inward Section */}
+            <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <span className="text-xs font-semibold text-slate-800">
+                  Drums Inward
+                </span>
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs">
                   <button
                     type="button"
                     onClick={() => setEntryMode('quick')}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors ${entryMode === 'quick'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${entryMode === 'quick'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
                       }`}
                   >
-                    Quick (2-Field Entry)
+                    Quick Entry
                   </button>
                   <button
                     type="button"
                     onClick={() => setEntryMode('detailed')}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors ${entryMode === 'detailed'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${entryMode === 'detailed'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
                       }`}
                   >
-                    Individual Drum Serials
+                    Individual Serials
                   </button>
                 </div>
               </div>
@@ -387,15 +375,15 @@ export function ReceiveCustomerDrumsDialog({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs font-semibold text-slate-800">
-                        1. Size of Drums (Flange x Core x Trav) *
+                      <Label className="text-xs font-medium text-slate-700">
+                        Drum Size *
                       </Label>
                       <button
                         type="button"
                         onClick={() => setIsCustomSize((prev) => !prev)}
-                        className="text-[11px] font-medium text-orange-600 hover:text-orange-700 underline cursor-pointer"
+                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer"
                       >
-                        {isCustomSize ? 'Choose from dropdown list' : '+ Enter custom size'}
+                        {isCustomSize ? 'Select from list' : '+ Custom size'}
                       </button>
                     </div>
 
@@ -410,42 +398,37 @@ export function ReceiveCustomerDrumsDialog({
                           }
                         }}
                       >
-                        <SelectTrigger className="bg-white text-xs h-9 font-mono font-bold border-slate-200">
-                          <SelectValue placeholder="Select Drum Size">
-                            {drumSize || 'Select Drum Size'}
+                        <SelectTrigger className="bg-white text-xs h-9 font-mono border-slate-200">
+                          <SelectValue placeholder="Select Size">
+                            {drumSize || 'Select Size'}
                           </SelectValue>
                         </SelectTrigger>
-                        <SelectContent className="max-h-64">
+                        <SelectContent className="max-h-60">
                           {availableSizes.map((sz) => (
-                            <SelectItem key={sz} value={sz} className="text-xs font-mono font-medium">
+                            <SelectItem key={sz} value={sz} className="text-xs font-mono">
                               {sz}
                             </SelectItem>
                           ))}
-                          <SelectItem value="__CUSTOM__" className="text-xs font-semibold text-orange-600">
-                            + Enter Custom Drum Size...
+                          <SelectItem value="__CUSTOM__" className="text-xs font-medium text-indigo-600">
+                            + Enter Custom Size...
                           </SelectItem>
                         </SelectContent>
                       </Select>
                     ) : (
-                      <div className="space-y-1">
-                        <Input
-                          value={drumSize}
-                          onChange={(e) => setDrumSize(e.target.value)}
-                          placeholder="e.g. 44X16X24 or 1400X700X900"
-                          className="bg-white text-xs h-9 font-mono font-bold border-orange-300 focus-visible:ring-orange-400"
-                          required
-                          autoFocus
-                        />
-                        <p className="text-[10px] text-slate-500">
-                          Enter dimensions in inches (e.g. 44X16X24) or mm (e.g. 1400X700X900).
-                        </p>
-                      </div>
+                      <Input
+                        value={drumSize}
+                        onChange={(e) => setDrumSize(e.target.value)}
+                        placeholder="e.g. 44X16X24"
+                        className="bg-white text-xs h-9 font-mono border-slate-300"
+                        required
+                        autoFocus
+                      />
                     )}
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-slate-800">
-                      2. Number of Drums Received *
+                    <Label className="text-xs font-medium text-slate-700">
+                      Quantity Received *
                     </Label>
                     <Input
                       type="number"
@@ -453,87 +436,84 @@ export function ReceiveCustomerDrumsDialog({
                       value={numberOfDrums}
                       onChange={(e) => setNumberOfDrums(e.target.value)}
                       placeholder="e.g. 4"
-                      className="bg-white text-xs h-9 font-mono font-bold text-lg"
+                      className="bg-white text-xs h-9 font-mono"
                       required
                     />
-                    <span className="text-[11px] text-slate-500 block">
-                      Will automatically create drums under RGP #{customerChallanNumber || '...'}
-                    </span>
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-slate-600">Drum Identification Prefix</Label>
+                    <Label className="text-xs font-medium text-slate-600">Serial Prefix</Label>
                     <Input
                       value={drumPrefix}
                       onChange={(e) => setDrumPrefix(e.target.value)}
                       placeholder="MF/"
-                      className="bg-white text-xs h-8 font-mono"
+                      className="bg-white text-xs h-9 font-mono"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-slate-600">Construction &amp; Tare Wt</Label>
+                    <Label className="text-xs font-medium text-slate-600">Material &amp; Tare Wt (kg)</Label>
                     <div className="grid grid-cols-2 gap-2">
                       <Select value={drumType} onValueChange={setDrumType}>
-                        <SelectTrigger className="bg-white text-xs h-8">
+                        <SelectTrigger className="bg-white text-xs h-9">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="WOODEN">Wooden Reel</SelectItem>
-                          <SelectItem value="STEEL">Corrugated Steel</SelectItem>
-                          <SelectItem value="PLASTIC">Plastic Spool</SelectItem>
+                          <SelectItem value="WOODEN" className="text-xs">Wooden</SelectItem>
+                          <SelectItem value="STEEL" className="text-xs">Steel</SelectItem>
+                          <SelectItem value="PLASTIC" className="text-xs">Plastic</SelectItem>
                         </SelectContent>
                       </Select>
                       <Input
                         type="number"
                         value={tareWeightKg}
                         onChange={(e) => setTareWeightKg(e.target.value)}
-                        placeholder="150 kg"
-                        className="bg-white text-xs h-8 font-mono"
+                        placeholder="150"
+                        className="bg-white text-xs h-9 font-mono"
                       />
                     </div>
                   </div>
                 </div>
               ) : (
                 /* Detailed Table of Serials */
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-700">
-                      Individual Drum Identification ({drumRows.length} Drums)
+                    <span className="text-xs text-slate-600">
+                      {drumRows.length} {drumRows.length === 1 ? 'drum' : 'drums'} configured
                     </span>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={handleAddRow}
-                      className="h-7 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 font-medium"
+                      className="h-7 text-xs"
                     >
                       <Plus className="w-3.5 h-3.5 mr-1" />
-                      Add Drum Row
+                      Add Drum
                     </Button>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                  <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
                     <table className="w-full text-xs text-left">
-                      <thead className="bg-slate-100 text-slate-700 font-semibold text-[11px] uppercase">
+                      <thead className="bg-slate-50 text-slate-600 font-medium text-[11px] uppercase border-b border-slate-200">
                         <tr>
                           <th className="p-2 w-10 text-center">#</th>
                           <th className="p-2">Drum No.</th>
                           <th className="p-2">Size</th>
                           <th className="p-2">Type</th>
-                          <th className="p-2">Tare Wt (Kg)</th>
+                          <th className="p-2">Tare (kg)</th>
                           <th className="p-2 w-8"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {drumRows.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50">
-                            <td className="p-1.5 text-center font-mono text-slate-500">{idx + 1}</td>
+                          <tr key={idx} className="hover:bg-slate-50/50">
+                            <td className="p-1.5 text-center font-mono text-slate-400">{idx + 1}</td>
                             <td className="p-1.5">
                               <Input
                                 value={row.drumNumber}
                                 onChange={(e) => handleRowChange(idx, 'drumNumber', e.target.value)}
-                                className="h-7 text-xs font-mono font-bold"
+                                className="h-7 text-xs font-mono"
                                 required
                               />
                             </td>
@@ -565,9 +545,9 @@ export function ReceiveCustomerDrumsDialog({
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="WOODEN">Wooden</SelectItem>
-                                  <SelectItem value="STEEL">Steel</SelectItem>
-                                  <SelectItem value="PLASTIC">Plastic</SelectItem>
+                                  <SelectItem value="WOODEN" className="text-xs">Wooden</SelectItem>
+                                  <SelectItem value="STEEL" className="text-xs">Steel</SelectItem>
+                                  <SelectItem value="PLASTIC" className="text-xs">Plastic</SelectItem>
                                 </SelectContent>
                               </Select>
                             </td>
@@ -599,8 +579,8 @@ export function ReceiveCustomerDrumsDialog({
               )}
             </div>
 
-            {/* Logistics Details (Optional) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+            {/* Optional Logistics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
               <div className="space-y-1">
                 <Label className="text-[11px] font-medium text-slate-600">Vehicle Number</Label>
                 <Input
@@ -622,14 +602,14 @@ export function ReceiveCustomerDrumsDialog({
             </div>
           </div>
 
-          <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
               disabled={loading}
-              className="text-xs border-slate-200 cursor-pointer"
+              className="text-xs h-9 cursor-pointer"
             >
               Cancel
             </Button>
@@ -637,10 +617,10 @@ export function ReceiveCustomerDrumsDialog({
               type="submit"
               disabled={loading}
               size="sm"
-              className="bg-orange-600 hover:bg-orange-700 text-white font-semibold gap-1.5 shadow-sm text-xs cursor-pointer"
+              className="bg-slate-900 hover:bg-slate-800 text-white font-medium gap-1.5 text-xs h-9 cursor-pointer"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              {loading ? 'Receiving Drums...' : `Receive ${selectedCount} Drums in Yard`}
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {loading ? 'Receiving...' : `Receive ${selectedCount} Drums`}
             </Button>
           </div>
         </form>

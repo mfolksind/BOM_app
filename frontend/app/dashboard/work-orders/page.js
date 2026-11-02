@@ -38,6 +38,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+
 import { CreateWorkOrderDialog } from '@/components/work-orders/create-work-order-dialog';
 import { EditWorkOrderDialog } from '@/components/work-orders/edit-work-order-dialog';
 import { RecordWorkOrderScrapDialog } from '@/components/work-orders/record-work-order-scrap-dialog';
@@ -158,30 +168,66 @@ export default function WorkOrdersPage() {
     setEditOpen(true);
   };
 
-  const handleConfirmWorkOrder = async (woId) => {
-    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe and reserves/freezes required material stock.')) return;
-    try {
-      const res = await api.post(`/work-orders/${woId}/confirm`, { autoReserve: true });
-      if (res?.success) {
-        toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
-        fetchWorkOrders(pagination.page);
-      }
-    } catch (err) {
-      toast.error(err.message || 'Failed to confirm work order');
-    }
+  // Modal state for confirmation and cancellation dialogs
+  const [confirmModal, setConfirmModal] = useState({
+    open: false,
+    type: null, // 'CONFIRM' | 'COMPLETE' | 'CANCEL'
+    workOrder: null,
+    reason: '',
+    loading: false,
+  });
+
+  const openConfirmDialog = (wo, type) => {
+    setConfirmModal({
+      open: true,
+      type,
+      workOrder: wo,
+      reason: '',
+      loading: false,
+    });
   };
 
-  const handleCancelWorkOrder = async (woId) => {
-    const reason = prompt('Please enter cancellation reason:');
-    if (!reason || !reason.trim()) return;
+  const handleModalSubmit = async () => {
+    const { type, workOrder, reason } = confirmModal;
+    if (!workOrder) return;
+
+    if (type === 'CANCEL' && !reason.trim()) {
+      toast.error('Please enter a cancellation reason');
+      return;
+    }
+
+    setConfirmModal((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await api.post(`/work-orders/${woId}/cancel`, { reason: reason.trim() });
-      if (res?.success) {
-        toast.success('Work order cancelled');
-        fetchWorkOrders(pagination.page);
+      if (type === 'CONFIRM') {
+        const res = await api.post(`/work-orders/${workOrder._id}/confirm`, { autoReserve: true });
+        if (res?.success) {
+          toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
+          fetchWorkOrders(pagination.page);
+          setConfirmModal({ open: false, type: null, workOrder: null, reason: '', loading: false });
+        }
+      } else if (type === 'COMPLETE') {
+        const res = await api.post(`/work-orders/${workOrder._id}/complete`, {
+          force: true,
+          remarks: reason.trim() || 'Completed via action menu',
+        });
+        if (res?.success || res?.data) {
+          toast.success(
+            `Work Order ${workOrder.workOrderNumber} marked as COMPLETED. Client stock unfrozen & removed from inventory.`
+          );
+          fetchWorkOrders(pagination.page);
+          setConfirmModal({ open: false, type: null, workOrder: null, reason: '', loading: false });
+        }
+      } else if (type === 'CANCEL') {
+        const res = await api.post(`/work-orders/${workOrder._id}/cancel`, { reason: reason.trim() });
+        if (res?.success) {
+          toast.success('Work order cancelled successfully');
+          fetchWorkOrders(pagination.page);
+          setConfirmModal({ open: false, type: null, workOrder: null, reason: '', loading: false });
+        }
       }
     } catch (err) {
-      toast.error(err.message || 'Failed to cancel work order');
+      toast.error(err.message || 'Operation failed');
+      setConfirmModal((prev) => ({ ...prev, loading: false }));
     }
   };
 
@@ -551,6 +597,16 @@ export default function WorkOrdersPage() {
                                 Record / View Scrap
                               </DropdownMenuItem>
 
+                              {wo.status !== 'COMPLETED' && wo.status !== 'CANCELLED' && (
+                                <DropdownMenuItem
+                                  onClick={() => openConfirmDialog(wo, 'COMPLETE')}
+                                  className="cursor-pointer gap-2 text-emerald-700 font-medium focus:text-emerald-800 focus:bg-emerald-50"
+                                >
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                  Mark as Complete
+                                </DropdownMenuItem>
+                              )}
+
                               {wo.status === 'DRAFT' && (
                                 <DropdownMenuItem
                                   onClick={() => handleRowClick(wo, 'edit')}
@@ -565,14 +621,14 @@ export default function WorkOrdersPage() {
                                 <>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    onClick={() => handleConfirmWorkOrder(wo._id)}
+                                    onClick={() => openConfirmDialog(wo, 'CONFIRM')}
                                     className="cursor-pointer gap-2 text-emerald-600 font-medium"
                                   >
                                     <CheckCircle2 className="w-4 h-4" />
                                     Confirm & Freeze BOM
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
-                                    onClick={() => handleCancelWorkOrder(wo._id)}
+                                    onClick={() => openConfirmDialog(wo, 'CANCEL')}
                                     className="cursor-pointer gap-2 text-rose-600"
                                   >
                                     <XCircle className="w-4 h-4" />
@@ -651,6 +707,119 @@ export default function WorkOrdersPage() {
         onOpenChange={setScrapDialogOpen}
         onSuccess={() => fetchWorkOrders(pagination.page)}
       />
+
+      {/* Confirmation & Status Action Modal Dialog */}
+      <Dialog
+        open={confirmModal.open}
+        onOpenChange={(val) => {
+          if (!val && !confirmModal.loading) {
+            setConfirmModal({ open: false, type: null, workOrder: null, reason: '', loading: false });
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              {confirmModal.type === 'COMPLETE' && (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  Mark Work Order as Complete
+                </>
+              )}
+              {confirmModal.type === 'CONFIRM' && (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  Confirm Work Order &amp; Freeze BOM
+                </>
+              )}
+              {confirmModal.type === 'CANCEL' && (
+                <>
+                  <XCircle className="w-5 h-5 text-rose-600" />
+                  Cancel Work Order
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 pt-1">
+              Work Order:{' '}
+              <span className="font-mono font-bold text-slate-800">
+                {confirmModal.workOrder?.workOrderNumber}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-3 text-xs text-slate-600 space-y-3">
+            {confirmModal.type === 'COMPLETE' && (
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-lg text-emerald-950 space-y-1.5">
+                <p className="font-semibold text-emerald-900">
+                  Are you sure you want to complete this order?
+                </p>
+                <p className="text-[11px] text-emerald-800">
+                  This will unfreeze reserved materials, consume and deduct the allocated raw material quantities from the client&apos;s active inventory &amp; material lots, and make the order eligible for Drum Packing.
+                </p>
+              </div>
+            )}
+
+            {confirmModal.type === 'CONFIRM' && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 space-y-1">
+                <p className="font-medium text-slate-900">
+                  Confirm and freeze recipe norms?
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  This permanently locks the active BOM recipe snapshot and automatically reserves/freezes required raw material stock from the client&apos;s available inventory.
+                </p>
+              </div>
+            )}
+
+            {confirmModal.type === 'CANCEL' && (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-700 font-medium">
+                  Please provide a reason for cancelling this work order:
+                </p>
+                <Textarea
+                  value={confirmModal.reason}
+                  onChange={(e) => setConfirmModal((prev) => ({ ...prev, reason: e.target.value }))}
+                  placeholder="e.g. Client requested specification change or cancellation..."
+                  className="text-xs h-20"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={confirmModal.loading}
+              onClick={() =>
+                setConfirmModal({ open: false, type: null, workOrder: null, reason: '', loading: false })
+              }
+              className="h-8 text-xs cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={confirmModal.loading}
+              onClick={handleModalSubmit}
+              className={`h-8 text-xs font-medium cursor-pointer ${
+                confirmModal.type === 'CANCEL'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white'
+              }`}
+            >
+              {confirmModal.loading
+                ? 'Processing...'
+                : confirmModal.type === 'COMPLETE'
+                  ? 'Yes, Mark Complete'
+                  : confirmModal.type === 'CONFIRM'
+                    ? 'Confirm Order'
+                    : 'Confirm Cancellation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

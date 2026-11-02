@@ -12,12 +12,6 @@ const normalizeBomItemInput = (raw: unknown) => {
   if (item.normQuantity !== undefined && item.quantityPerUnit === undefined) {
     item.quantityPerUnit = item.normQuantity;
   }
-  if (
-    item.scrapTolerancePercent !== undefined &&
-    item.scrapTolerancePercentage === undefined
-  ) {
-    item.scrapTolerancePercentage = item.scrapTolerancePercent;
-  }
   if (item.stage !== undefined && item.notes === undefined) {
     item.notes = String(item.stage);
   }
@@ -47,11 +41,7 @@ const baseBomItemInputSchema = z.object({
   materialId: objectIdValidator,
   processStageId: objectIdValidator.optional(),
   quantityPerUnit: z.coerce.number().positive('Quantity per unit must be greater than 0'),
-  scrapTolerancePercentage: z.coerce
-    .number()
-    .min(0, 'Scrap tolerance cannot be negative')
-    .max(100, 'Scrap tolerance cannot exceed 100%')
-    .default(0),
+  scrapTolerancePercentage: z.coerce.number().min(0).max(100).default(0).optional(),
   isMandatory: z.boolean().default(true),
   stageSequence: z.coerce.number().int().min(1, 'Stage sequence must be at least 1').default(1),
   notes: z.string().max(500).trim().optional(),

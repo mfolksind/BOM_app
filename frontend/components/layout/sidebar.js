@@ -28,6 +28,7 @@ import {
   Cog,
   Workflow,
   UploadCloud,
+  Trash2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -125,6 +126,11 @@ const navSections = [
         title: 'Outbound Dispatch',
         href: '/dashboard/dispatch',
         icon: Truck,
+      },
+      {
+        title: 'Scrap & Returns',
+        href: '/dashboard/scraps',
+        icon: Trash2,
       },
       {
         title: 'Material Reconciliation',

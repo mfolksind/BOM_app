@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { DispatchModel, IDispatch } from './dispatch.model';
 import { DispatchLineModel } from './dispatch-line.model';
 import { OutboundChallanModel, IOutboundChallan } from './outbound-challan.model';
+import { ScrapChallanModel, IScrapChallan } from './scrap-challan.model';
 import { PackingListModel } from '../packing/packing-list.model';
 import { PackingListLineModel } from '../packing/packing-list-line.model';
 import { DrumModel } from '../packing/drum.model';
@@ -16,6 +17,7 @@ import { InventorySequenceUtil } from '../inventory/inventory-sequence.util';
 import { InventoryAuditUtil } from '../inventory/inventory-audit.util';
 import { InboundChallanModel } from '../inventory/inbound-challan.model';
 import { InboundChallanLineModel } from '../inventory/inbound-challan-line.model';
+import { MaterialLotModel } from '../materials/material-lot.model';
 import { InventoryIdempotencyUtil } from '../inventory/inventory-idempotency.util';
 import { BomVersionModel } from '../bom/bom-version.model';
 import { BomItemModel } from '../bom/bom-item.model';
@@ -953,13 +955,12 @@ export class DispatchService {
       materialName: string;
       hsn: string;
       normPerMeter: number;
-      scrapPercentage: number;
       standardCost: number;
     }
 
     const materialDemands: MaterialDemand[] = [];
 
-    // 1. From BOM items (including scrap factor: total gross requirement = base * (1 + scrap% / 100))
+    // 1. From BOM items
     for (const b of bomItems) {
       const mat = b.materialId as any;
       const matName = mat?.name || b.materialName || 'Raw Material';
@@ -976,16 +977,6 @@ export class DispatchService {
         norm = Number((rawNorm / 1000).toFixed(6));
       }
 
-      // Include scrap tolerance / scrap factor in total quantity used per meter
-      let scrapPct = Number(b.scrapTolerancePercentage || mat?.scrapTolerancePercentage || 0);
-      if (scrapPct <= 0) {
-        // Typical cable manufacturing industry scrap default (2% to 3% job work scrap)
-        scrapPct = 2.5;
-      }
-      if (scrapPct > 0) {
-        norm = Number((norm * (1 + scrapPct / 100)).toFixed(6));
-      }
-
       const cost = mat?.standardCost || 100;
 
       const mId = mat?._id?.toString() || b.materialId?.toString();
@@ -995,7 +986,6 @@ export class DispatchService {
           materialName: matName,
           hsn,
           normPerMeter: norm,
-          scrapPercentage: scrapPct,
           standardCost: cost,
         });
       }
@@ -1013,7 +1003,12 @@ export class DispatchService {
         if (matId && !materialDemands.some((m) => m.materialId === matId)) {
           const lower = matName.toLowerCase();
           let norm = 0.1;
-          if (lower.includes('aluminum') || lower.includes('aluminium') || lower.includes('conductor') || lower.includes('rod')) {
+          if (
+            lower.includes('aluminum') ||
+            lower.includes('aluminium') ||
+            lower.includes('conductor') ||
+            lower.includes('rod')
+          ) {
             norm = 0.348;
           } else if (lower.includes('xlpe') || lower.includes('insulation')) {
             norm = 0.098;
@@ -1021,17 +1016,18 @@ export class DispatchService {
             norm = 0.182;
           } else if (lower.includes('strip') || lower.includes('gi') || lower.includes('armour')) {
             norm = 0.228;
-          } else if (lower.includes('master') || lower.includes('batch') || lower.includes('color')) {
+          } else if (
+            lower.includes('master') ||
+            lower.includes('batch') ||
+            lower.includes('color')
+          ) {
             norm = 0.00049;
           }
-          const defaultScrapPct = 2.5;
-          norm = Number((norm * (1 + defaultScrapPct / 100)).toFixed(6));
           materialDemands.push({
             materialId: matId,
             materialName: matName,
             hsn,
             normPerMeter: norm,
-            scrapPercentage: defaultScrapPct,
             standardCost: cost,
           });
         }
@@ -1053,14 +1049,18 @@ export class DispatchService {
         for (const ic of sortedInboundChallans) {
           const matchingLines = ic.lines.filter((l: any) => {
             const lineMatId = l.materialId?._id?.toString() || l.materialId?.toString();
-            return lineMatId === demand.materialId ||
-              (l.materialCode && demand.materialName.toLowerCase().includes(l.materialCode.toLowerCase()));
+            return (
+              lineMatId === demand.materialId ||
+              (l.materialCode &&
+                demand.materialName.toLowerCase().includes(l.materialCode.toLowerCase()))
+            );
           });
 
           for (const ml of matchingLines) {
             const origQty = ml.receivedQuantity || ml.challanQuantity || 0;
             const unitRate = ml.unitRate || demand.standardCost || 100;
-            const refDate = (ic as any).customerChallanDate || (ic as any).challanDate || (ic as any).createdAt;
+            const refDate =
+              (ic as any).customerChallanDate || (ic as any).challanDate || (ic as any).createdAt;
             matchingChallanEntries.push({
               challanRef: `${(ic as any).customerChallanNumber || (ic as any).challanNumber} DT ${formatDate(refDate)}`,
               challanDate: new Date(refDate),
@@ -1164,17 +1164,11 @@ export class DispatchService {
             continue;
           }
 
-          // Calculate scrap portion of this advice's usage: scrap = totalUsed * (scrapPct / (100 + scrapPct))
-          const sPct = demand.scrapPercentage || 2.5;
-          const scrapQtyFromThis = Number((thisAdviceInThis * (sPct / (100 + sPct))).toFixed(2));
-
           columns.push({
             challanRef: entry.challanRef,
             description: entry.materialName,
             hsn: entry.hsn,
             unitRate: rate,
-            scrapPercentage: sPct,
-            scrapQuantity: scrapQtyFromThis,
             originallyReceived: { qty: origQty, value: origVal },
             processingLoss: { qty: 0, value: 0 },
             netQuantity: { qty: origQty, value: origVal },
@@ -1187,7 +1181,6 @@ export class DispatchService {
         }
       }
     }
-
 
     const payload = {
       company: {
@@ -1270,9 +1263,7 @@ export class DispatchService {
     const dispatchIds = dispatches.map((d) => d._id);
     const challans = await OutboundChallanModel.find({ dispatchId: { $in: dispatchIds } });
     const challanMap = new Map(
-      challans
-        .filter((c) => c.dispatchId)
-        .map((c) => [c.dispatchId!.toString(), c]),
+      challans.filter((c) => c.dispatchId).map((c) => [c.dispatchId!.toString(), c]),
     );
 
     const history = await Promise.all(
@@ -1380,9 +1371,7 @@ export class DispatchService {
     const dispatchIds = dispatches.map((d) => d._id);
     const challans = await OutboundChallanModel.find({ dispatchId: { $in: dispatchIds } });
     const challanMap = new Map(
-      challans
-        .filter((c) => c.dispatchId)
-        .map((c) => [c.dispatchId!.toString(), c]),
+      challans.filter((c) => c.dispatchId).map((c) => [c.dispatchId!.toString(), c]),
     );
 
     const fulfillmentPercentage =
@@ -1409,6 +1398,734 @@ export class DispatchService {
         outboundChallanNumber: challanMap.get(d._id.toString())?.challanNumber || null,
       })),
     };
+  }
+
+  /**
+   * Get Active, Non-depleted Inbound Challans for Scrap Return
+   */
+  async getActiveInboundChallansForScrap(customerId: string) {
+    if (!customerId) throw new BadRequestError('Customer ID is required');
+
+    const customer = await CustomerModel.findById(customerId);
+    if (!customer) throw new NotFoundError('Customer not found');
+
+    // Fetch all customer lots with remaining balance (> 0)
+    const activeLots = await MaterialLotModel.find({
+      customerId: customer._id,
+      ownerType: 'CUSTOMER',
+      currentBalance: { $gt: 0 },
+    })
+      .populate('materialId', 'code name category hsnCode baseUnit standardCost')
+      .populate('warehouseId', 'code name type location')
+      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Group lots by Inbound Challan
+    const challanMap = new Map<string, any>();
+
+    for (const lot of activeLots) {
+      const ic = lot.inboundChallanId as any;
+      const mat = lot.materialId as any;
+      const wh = lot.warehouseId as any;
+      if (!mat) continue;
+
+      const icId = ic?._id ? ic._id.toString() : 'direct-inward';
+      const challanNumber = ic?.customerChallanNumber || ic?.challanNumber || 'Direct Inward';
+      const challanDate = ic?.customerChallanDate || (lot as any).createdAt;
+
+      if (!challanMap.has(icId)) {
+        challanMap.set(icId, {
+          inboundChallanId: icId !== 'direct-inward' ? icId : null,
+          challanNumber,
+          customerChallanNumber: ic?.customerChallanNumber || challanNumber,
+          challanDate,
+          vehicleNumber: ic?.vehicleNumber || '',
+          totalRemainingQuantity: 0,
+          lots: [],
+        });
+      }
+
+      const entry = challanMap.get(icId);
+      const remaining = Number((lot.currentBalance || 0).toFixed(2));
+      const initial = Number((lot.initialQuantity || (lot as any).receivedQuantity || remaining).toFixed(2));
+      entry.totalRemainingQuantity = Number((entry.totalRemainingQuantity + remaining).toFixed(2));
+
+      entry.lots.push({
+        lotId: lot._id.toString(),
+        lotNumber: lot.lotNumber,
+        supplierLotNumber: lot.supplierLotNumber,
+        materialId: mat._id?.toString() || '',
+        materialCode: mat.code || '',
+        materialName: mat.name || 'Raw Material',
+        unit: lot.unit || mat.baseUnit || 'KGS',
+        warehouseId: wh?._id?.toString() || '',
+        warehouseName: wh?.name || 'Warehouse',
+        initialQuantity: initial,
+        quantityAvailable: remaining,
+        currentBalance: remaining,
+      });
+    }
+
+    return Array.from(challanMap.values()).sort((a, b) => {
+      const dateA = a.challanDate ? new Date(a.challanDate).getTime() : 0;
+      const dateB = b.challanDate ? new Date(b.challanDate).getTime() : 0;
+      return dateB - dateA;
+    });
+  }
+
+  /**
+   * Helper to compute Scrap Consumption Sheet for a Scrap Challan
+   */
+  async computeScrapConsumptionSheet(
+    customer: any,
+    workOrders: any[] = [],
+    scrapItems: Array<{
+      workOrderId?: string;
+      workOrderNumber?: string;
+      inboundChallanId?: string;
+      inboundChallanNumber?: string;
+      inboundChallanDate?: Date | string;
+      lotId?: string;
+      lotNumber?: string;
+      materialId?: string;
+      materialCode?: string;
+      materialName: string;
+      initialQuantity?: number;
+      quantityAvailable?: number;
+      scrapQuantity: number;
+      unit: string;
+      remarks?: string;
+    }>,
+    challanMeta: {
+      challanNumber: string;
+      challanDate: Date;
+      vehicleNumber?: string;
+      remarks?: string;
+      placeOfSupply?: string;
+    },
+  ) {
+    const formatDate = (d?: Date | string) => {
+      if (!d) return '';
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return '';
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+
+    // 1. Gather all specific Inbound Challan IDs & Numbers linked to these work orders
+    const linkedIcIdSet = new Set<string>();
+    const linkedIcNumSet = new Set<string>();
+
+    for (const wo of workOrders) {
+      if (wo.inboundChallanId) {
+        linkedIcIdSet.add(
+          wo.inboundChallanId._id
+            ? wo.inboundChallanId._id.toString()
+            : wo.inboundChallanId.toString(),
+        );
+      }
+      if (wo.inboundChallanNumber) {
+        linkedIcNumSet.add(wo.inboundChallanNumber.trim().toLowerCase());
+      }
+      if (Array.isArray(wo.inboundChallanIds)) {
+        for (const id of wo.inboundChallanIds) {
+          if (id) linkedIcIdSet.add(id._id ? id._id.toString() : id.toString());
+        }
+      }
+      if (Array.isArray(wo.inboundChallanNumbers)) {
+        for (const num of wo.inboundChallanNumbers) {
+          if (num) linkedIcNumSet.add(num.trim().toLowerCase());
+        }
+      }
+    }
+
+    // 2. Fetch all posted inbound challans for this customer
+    const rawInboundChallans = await InboundChallanModel.find({
+      customerId: customer?._id,
+      status: 'POSTED',
+    }).lean();
+
+    const icIds = rawInboundChallans.map((ic) => ic._id);
+    const inboundLines = await InboundChallanLineModel.find({
+      inboundChallanId: { $in: icIds },
+    })
+      .populate('materialId')
+      .lean();
+
+    const linesByChallan: Record<string, any[]> = {};
+    for (const l of inboundLines) {
+      const cid = l.inboundChallanId.toString();
+      if (!linesByChallan[cid]) linesByChallan[cid] = [];
+      linesByChallan[cid].push(l);
+    }
+
+    const allInboundChallans = rawInboundChallans.map((ic) => ({
+      ...ic,
+      lines: linesByChallan[ic._id.toString()] || [],
+      isLinkedToWo:
+        linkedIcIdSet.has(ic._id.toString()) ||
+        (ic.customerChallanNumber &&
+          linkedIcNumSet.has(ic.customerChallanNumber.trim().toLowerCase())) ||
+        (ic.challanNumber && linkedIcNumSet.has(ic.challanNumber.trim().toLowerCase())),
+    }));
+
+    // Prioritize Inbound Challans that are explicitly linked to the selected work orders
+    const sortedInboundChallans = [...allInboundChallans].sort((a: any, b: any) => {
+      if (a.isLinkedToWo && !b.isLinkedToWo) return -1;
+      if (!a.isLinkedToWo && b.isLinkedToWo) return 1;
+      const dateA = new Date(a.customerChallanDate || a.createdAt).getTime();
+      const dateB = new Date(b.customerChallanDate || b.createdAt).getTime();
+      return dateA - dateB;
+    });
+
+    // 3. Find previous outbound and scrap challans to compute historical usage
+    const [previousOutbound, previousScrap] = await Promise.all([
+      OutboundChallanModel.find({
+        customerId: customer?._id,
+        status: { $ne: 'CANCELLED' },
+      }).sort({ createdAt: 1 }),
+      ScrapChallanModel.find({
+        customerId: customer?._id,
+        status: { $ne: 'CANCELLED' },
+      }).sort({ createdAt: 1 }),
+    ]);
+
+    // Aggregate scrap return items by material
+    const scrapByMaterial: Record<
+      string,
+      {
+        scrapQty: number;
+        materialName: string;
+        materialCode?: string;
+        hsn: string;
+        unitRate: number;
+        preferredInboundChallanNumber?: string;
+      }
+    > = {};
+
+    for (const item of scrapItems) {
+      const key = (item.materialName || '').trim().toLowerCase();
+      if (!scrapByMaterial[key]) {
+        scrapByMaterial[key] = {
+          scrapQty: 0,
+          materialName: item.materialName,
+          materialCode: item.materialCode,
+          hsn: '39011090',
+          unitRate: 100,
+          preferredInboundChallanNumber: (item as any).inboundChallanNumber,
+        };
+      }
+      scrapByMaterial[key].scrapQty += Number(item.scrapQuantity) || 0;
+    }
+
+    // 4. Build columns across Inbound Challan lots for each scrap material
+    const columns: any[] = [];
+    const materialKeys = Object.keys(scrapByMaterial);
+
+    for (const matKey of materialKeys) {
+      const scrapInfo = scrapByMaterial[matKey];
+      let remainingScrapToReturn = scrapInfo.scrapQty;
+
+      // Filter inbound challans that contain this material
+      const matchingEntries: Array<{
+        inboundChallanId: string;
+        challanRef: string;
+        originallyReceived: number;
+        rate: number;
+        hsn: string;
+        date: string;
+        isLinked: boolean;
+      }> = [];
+
+      for (const ic of sortedInboundChallans) {
+        for (const line of ic.lines || []) {
+          const mName = line.materialName || (line.materialId as any)?.name || '';
+          const mCode = line.materialCode || (line.materialId as any)?.code || '';
+          const isMatch =
+            mName.trim().toLowerCase() === matKey ||
+            (scrapInfo.materialCode &&
+              mCode &&
+              mCode.toLowerCase() === scrapInfo.materialCode.toLowerCase()) ||
+            (matKey.includes('aluminum') &&
+              (mName.toLowerCase().includes('aluminum') ||
+                mName.toLowerCase().includes('conductor') ||
+                mName.toLowerCase().includes('rod'))) ||
+            (matKey.includes('pvc') &&
+              (mName.toLowerCase().includes('pvc') || mName.toLowerCase().includes('sheath'))) ||
+            (matKey.includes('gi') &&
+              (mName.toLowerCase().includes('gi') ||
+                mName.toLowerCase().includes('strip') ||
+                mName.toLowerCase().includes('armour')));
+
+          if (isMatch) {
+            const rawRate =
+              line.unitRate || line.rate || (line.materialId as any)?.standardCost || 100;
+            const hsn = (line.materialId as any)?.hsnCode || '';
+            const refNum = ic.customerChallanNumber || ic.challanNumber || 'IC';
+            const refDate = formatDate(
+              ic.customerChallanDate || (ic as any).challanDate || (ic as any).createdAt,
+            );
+
+            matchingEntries.push({
+              inboundChallanId: ic._id.toString(),
+              challanRef: `${refNum} Dt. ${refDate}`,
+              originallyReceived: line.receivedQuantity || line.challanQuantity || 0,
+              rate: rawRate,
+              hsn,
+              date: refDate,
+              isLinked: Boolean(ic.isLinkedToWo),
+            });
+          }
+        }
+      }
+
+      if (matchingEntries.length === 0) {
+        // Fallback column if no matching inbound records exist in DB
+        const defaultRef =
+          scrapInfo.preferredInboundChallanNumber ||
+          (linkedIcNumSet.size > 0 ? Array.from(linkedIcNumSet)[0].toUpperCase() : 'IC');
+        columns.push({
+          challanRef: `${defaultRef} Dt. ${formatDate(challanMeta.challanDate)}`,
+          description: scrapInfo.materialName,
+          hsn: scrapInfo.hsn,
+          unitRate: scrapInfo.unitRate,
+          originallyReceived: {
+            qty: scrapInfo.scrapQty,
+            value: Number((scrapInfo.scrapQty * scrapInfo.unitRate).toFixed(2)),
+          },
+          processingLoss: { qty: 0, value: 0 },
+          netQuantity: {
+            qty: scrapInfo.scrapQty,
+            value: Number((scrapInfo.scrapQty * scrapInfo.unitRate).toFixed(2)),
+          },
+          qtyUsedEarlier: { qty: 0, value: 0 },
+          qtyUsedThisAdvice: { qty: 0, value: 0 },
+          balanceInHand: { qty: 0, value: 0 },
+          qtyReturn: {
+            qty: scrapInfo.scrapQty,
+            value: Number((scrapInfo.scrapQty * scrapInfo.unitRate).toFixed(2)),
+          },
+        });
+      } else {
+        // If some inbound entries are explicitly linked to the work order, sort them first
+        matchingEntries.sort((a, b) => {
+          if (a.isLinked && !b.isLinked) return -1;
+          if (!a.isLinked && b.isLinked) return 1;
+          return 0;
+        });
+
+        // Compute total quantity used in previous outbound challans for this material
+        let totalHistoricalUsed = 0;
+        for (const ob of previousOutbound) {
+          if (ob.consumptionSheet?.columns) {
+            for (const col of ob.consumptionSheet.columns) {
+              if (
+                col.description &&
+                (col.description.toLowerCase() === matKey ||
+                  col.description.toLowerCase().includes(matKey))
+              ) {
+                totalHistoricalUsed += Number(col.qtyUsedThisAdvice?.qty || 0);
+              }
+            }
+          }
+        }
+
+        let remainingHistoricalUsed = totalHistoricalUsed;
+
+        for (let idx = 0; idx < matchingEntries.length; idx++) {
+          const entry = matchingEntries[idx];
+          const isLast = idx === matchingEntries.length - 1;
+          const origQty = entry.originallyReceived;
+          const rate = entry.rate;
+          const origVal = Number((origQty * rate).toFixed(2));
+
+          // 1. Calculate how much of this inbound challan was used earlier
+          let earlierUsed = 0;
+          if (remainingHistoricalUsed > 0) {
+            earlierUsed = Math.min(origQty, remainingHistoricalUsed);
+            remainingHistoricalUsed = Number((remainingHistoricalUsed - earlierUsed).toFixed(2));
+          }
+          earlierUsed = Number(earlierUsed.toFixed(2));
+          const earlierVal = Number((earlierUsed * rate).toFixed(2));
+
+          // Available balance before scrap return
+          const availableInLot = Math.max(0, origQty - earlierUsed);
+
+          // 2. Return scrap against this inbound lot
+          let returnInThis = 0;
+          if (remainingScrapToReturn > 0) {
+            if (isLast) {
+              returnInThis = remainingScrapToReturn;
+              remainingScrapToReturn = 0;
+            } else {
+              returnInThis = Math.min(availableInLot, remainingScrapToReturn);
+              remainingScrapToReturn = Number((remainingScrapToReturn - returnInThis).toFixed(2));
+            }
+          }
+          returnInThis = Number(returnInThis.toFixed(2));
+          const returnVal = Number((returnInThis * rate).toFixed(2));
+
+          // 3. Balance in hand
+          const balanceQty = Number((origQty - earlierUsed - returnInThis).toFixed(2));
+          const balanceVal = Number((balanceQty * rate).toFixed(2));
+
+          columns.push({
+            challanRef: entry.challanRef,
+            description: scrapInfo.materialName,
+            hsn: entry.hsn || scrapInfo.hsn,
+            unitRate: rate,
+            originallyReceived: { qty: origQty, value: origVal },
+            processingLoss: { qty: 0, value: 0 },
+            netQuantity: { qty: origQty, value: origVal },
+            qtyUsedEarlier: { qty: earlierUsed, value: earlierVal },
+            qtyUsedThisAdvice: { qty: 0, value: 0 }, // 0.00 for scrap return advice
+            balanceInHand: { qty: balanceQty, value: balanceVal },
+            qtyReturn: { qty: returnInThis, value: returnVal }, // Exact Scrap quantity returned
+          });
+        }
+      }
+    }
+
+    const totalScrapWeight = scrapItems.reduce(
+      (sum, item) => sum + (Number(item.scrapQuantity) || 0),
+      0,
+    );
+    const woListString =
+      workOrders.length > 0
+        ? workOrders.map((w) => w.workOrderNumber).join(', ')
+        : (Array.from(linkedIcNumSet).map((n) => n.toUpperCase()).join(', ') || 'JOBWORK-SCRAP');
+
+    return {
+      company: {
+        name: 'MFOLKS INDUSTRIES PRIVATE LIMITED',
+        address:
+          'F-279 A, RIICO Industrial Area, Chopanki, Tapukara, Alwar, Rajasthan, India - 301707',
+        gstin: '08AAOCM2650D1ZI',
+        pan: 'AAOCM2650D',
+        cin: 'U27320DL2021PTC376425',
+      },
+      documentTitle: 'Material Consumption Sheet (Scrap Return)',
+      subtitle:
+        '(For return of scrap goods / process waste to parent factory under GST rule on job work basis.)',
+      metadata: {
+        challanNumber: challanMeta.challanNumber,
+        date: formatDate(challanMeta.challanDate),
+        recipientName: customer?.legalName || customer?.name || 'Customer',
+        recipientAddress: customer?.billingAddress
+          ? `${customer.billingAddress.street || ''}, ${customer.billingAddress.city || ''}, ${customer.billingAddress.state || ''} - ${customer.billingAddress.postalCode || ''}`
+          : 'Customer Address',
+        recipientGstin: customer?.gstin || 'GST-UNREGISTERED',
+        natureOfProcess: 'Cable Manufacturing Process Waste & Scrap Return',
+        descriptionOfGoodsReturned: 'Manufacturing Scrap / Job-Work Waste Return',
+        dispatchQuantity: `${totalScrapWeight.toFixed(2)} Kgs (Job-Work Scrap Return)`,
+        workOrderNumberAndDate: woListString || 'WO-SCRAP',
+      },
+      columns,
+      dispatchDetails: {
+        dateOfDispatch: formatDate(challanMeta.challanDate),
+        vehicleNumber: challanMeta.vehicleNumber || 'N/A',
+        placeOfSupply:
+          challanMeta.placeOfSupply ||
+          (customer?.billingAddress?.city
+            ? `${customer.billingAddress.city}-${customer.billingAddress.state}`
+            : 'Chopanki'),
+        place: 'Chopanki',
+        date: formatDate(challanMeta.challanDate),
+        remarks:
+          challanMeta.remarks || 'Process scrap / job work waste returned back to principal.',
+        authorizedSignatory: 'For MFOLKS INDUSTRIES PRIVATE LIMITED',
+      },
+    };
+  }
+
+  /**
+   * Create a new Scrap Return Challan with multi-work-order support
+   */
+  async createScrapChallan(data: {
+    customerId: string;
+    challanNumber?: string;
+    challanDate?: Date | string;
+    vehicleNumber?: string;
+    transporter?: string;
+    lrNumber?: string;
+    deliveryAddress?: string;
+    placeOfSupply?: string;
+    remarks?: string;
+    items: Array<{
+      inboundChallanId?: string;
+      inboundChallanNumber?: string;
+      inboundChallanDate?: Date | string;
+      lotId?: string;
+      lotNumber?: string;
+      workOrderId?: string;
+      workOrderNumber?: string;
+      materialId?: string;
+      materialCode?: string;
+      materialName: string;
+      initialQuantity?: number;
+      quantityAvailable?: number;
+      scrapQuantity: number;
+      unit?: string;
+      remarks?: string;
+    }>;
+    issuedBy?: string;
+  }) {
+    if (!data.customerId) throw new BadRequestError('Customer is required');
+    if (!data.items || data.items.length === 0) {
+      throw new BadRequestError('At least one scrap item is required');
+    }
+
+    const customer = await CustomerModel.findById(data.customerId);
+    if (!customer) throw new NotFoundError('Customer not found');
+
+    // Collect linked inbound challan IDs and numbers
+    const icIdStrings = Array.from(
+      new Set(data.items.filter((i) => i.inboundChallanId).map((i) => i.inboundChallanId!)),
+    );
+    const icNumbers = Array.from(
+      new Set(
+        data.items
+          .filter((i) => i.inboundChallanNumber)
+          .map((i) => i.inboundChallanNumber!.trim().toUpperCase()),
+      ),
+    );
+
+    // Optional work order collection if any items reference work orders
+    const woIdStrings = Array.from(
+      new Set(data.items.filter((i) => i.workOrderId).map((i) => i.workOrderId!)),
+    );
+    const workOrders =
+      woIdStrings.length > 0 ? await WorkOrderModel.find({ _id: { $in: woIdStrings } }) : [];
+    const woNumbers = Array.from(new Set(workOrders.map((w) => w.workOrderNumber)));
+
+    // Generate auto challan number if not provided
+    let challanNum = (data.challanNumber || '').trim();
+    if (!challanNum) {
+      const count = await ScrapChallanModel.countDocuments();
+      const currentYear = new Date().getFullYear().toString().slice(-2);
+      const nextYear = (new Date().getFullYear() + 1).toString().slice(-2);
+      challanNum = `MF/SC/${currentYear}${nextYear}/${String(count + 1).padStart(3, '0')}`;
+    }
+
+    // Check unique challanNumber
+    const existing = await ScrapChallanModel.findOne({ challanNumber: challanNum });
+    if (existing) {
+      throw new ConflictError(`Scrap challan number '${challanNum}' already exists`);
+    }
+
+    const totalScrapQuantity = data.items.reduce(
+      (sum, item) => sum + (Number(item.scrapQuantity) || 0),
+      0,
+    );
+
+    const challanDate = data.challanDate ? new Date(data.challanDate) : new Date();
+
+    // Compute material consumption sheet
+    const consumptionSheet = await this.computeScrapConsumptionSheet(
+      customer,
+      workOrders,
+      data.items.map((item) => ({
+        ...item,
+        unit: item.unit || 'KGS',
+      })),
+      {
+        challanNumber: challanNum,
+        challanDate,
+        vehicleNumber: data.vehicleNumber,
+        remarks: data.remarks,
+        placeOfSupply: data.placeOfSupply,
+      },
+    );
+
+    const scrapChallan = await ScrapChallanModel.create({
+      challanNumber: challanNum,
+      challanDate,
+      customerId: customer._id,
+      inboundChallanIds: icIdStrings.map((id) => new mongoose.Types.ObjectId(id)),
+      inboundChallanNumbers: icNumbers,
+      workOrderIds: workOrders.map((w) => w._id),
+      workOrderNumbers: woNumbers,
+      vehicleNumber: data.vehicleNumber,
+      transporter: data.transporter,
+      lrNumber: data.lrNumber,
+      deliveryAddress:
+        data.deliveryAddress ||
+        (customer.billingAddress
+          ? `${customer.billingAddress.street || ''}, ${customer.billingAddress.city || ''}`
+          : ''),
+      placeOfSupply: data.placeOfSupply,
+      totalScrapQuantity,
+      items: data.items.map((i) => ({
+        ...i,
+        unit: i.unit || 'KGS',
+        scrapQuantity: Number(i.scrapQuantity) || 0,
+        inboundChallanId: i.inboundChallanId
+          ? new mongoose.Types.ObjectId(i.inboundChallanId)
+          : undefined,
+        inboundChallanNumber: i.inboundChallanNumber,
+        inboundChallanDate: i.inboundChallanDate ? new Date(i.inboundChallanDate) : undefined,
+        lotId: i.lotId ? new mongoose.Types.ObjectId(i.lotId) : undefined,
+        lotNumber: i.lotNumber,
+        workOrderId: i.workOrderId ? new mongoose.Types.ObjectId(i.workOrderId) : undefined,
+        workOrderNumber: i.workOrderNumber,
+        materialId: i.materialId ? new mongoose.Types.ObjectId(i.materialId) : undefined,
+      })),
+      status: 'ISSUED',
+      issuedBy: data.issuedBy ? new mongoose.Types.ObjectId(data.issuedBy) : undefined,
+      consumptionSheet,
+      remarks: data.remarks,
+    });
+
+    // Deduct returned scrap quantity from corresponding customer Material Lots and Inventory Balances
+    for (const item of data.items) {
+      const returnQty = Number(item.scrapQuantity) || 0;
+      if (returnQty <= 0) continue;
+
+      if (item.lotId) {
+        const lot = await MaterialLotModel.findById(item.lotId);
+        if (lot) {
+          lot.currentBalance = Math.max(0, Number(((lot.currentBalance || 0) - returnQty).toFixed(3)));
+          await lot.save();
+        }
+      } else if (item.inboundChallanId && item.materialId) {
+        // Fallback: Deduct from lot matching inbound challan and material
+        const lot = await MaterialLotModel.findOne({
+          inboundChallanId: new mongoose.Types.ObjectId(item.inboundChallanId),
+          materialId: new mongoose.Types.ObjectId(item.materialId),
+          ownerType: 'CUSTOMER',
+          currentBalance: { $gt: 0 },
+        });
+        if (lot) {
+          lot.currentBalance = Math.max(0, Number(((lot.currentBalance || 0) - returnQty).toFixed(3)));
+          await lot.save();
+        }
+      }
+
+      // Also adjust InventoryBalance for this customer and material
+      if (item.materialId) {
+        const bal = await InventoryBalanceModel.findOne({
+          materialId: new mongoose.Types.ObjectId(item.materialId),
+          ownerType: 'CUSTOMER',
+          customerId: customer._id,
+          quantityOnHand: { $gt: 0 },
+        });
+        if (bal) {
+          bal.quantityOnHand = Math.max(0, Number(((bal.quantityOnHand || 0) - returnQty).toFixed(3)));
+          bal.quantityAvailable = Math.max(0, Number(((bal.quantityOnHand || 0) - (bal.quantityReserved || 0)).toFixed(3)));
+          await bal.save();
+        }
+      }
+    }
+
+    return scrapChallan;
+  }
+
+  /**
+   * List Scrap Return Challans
+   */
+  async getScrapChallans(filter: {
+    customerId?: string;
+    workOrderId?: string;
+    status?: string;
+    search?: string;
+    page: number;
+    limit: number;
+  }) {
+    const query: Record<string, any> = {};
+
+    if (filter.customerId) query.customerId = new mongoose.Types.ObjectId(filter.customerId);
+    if (filter.workOrderId) query.workOrderIds = new mongoose.Types.ObjectId(filter.workOrderId);
+    if (filter.status && filter.status !== 'ALL') query.status = filter.status;
+    if (filter.search) {
+      const searchRegex = new RegExp(filter.search, 'i');
+      query.$or = [
+        { challanNumber: searchRegex },
+        { workOrderNumbers: searchRegex },
+        { vehicleNumber: searchRegex },
+        { transporter: searchRegex },
+      ];
+    }
+
+    const skip = (filter.page - 1) * filter.limit;
+    const [challans, total] = await Promise.all([
+      ScrapChallanModel.find(query)
+        .populate('customerId', 'code name legalName billingAddress gstin')
+        .populate('issuedBy', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(filter.limit),
+      ScrapChallanModel.countDocuments(query),
+    ]);
+
+    return {
+      challans,
+      pagination: {
+        page: filter.page,
+        limit: filter.limit,
+        total,
+        totalPages: Math.ceil(total / filter.limit) || 1,
+      },
+    };
+  }
+
+  /**
+   * Get single Scrap Challan by ID
+   */
+  async getScrapChallanById(id: string) {
+    const challan = await ScrapChallanModel.findById(id)
+      .populate('customerId')
+      .populate('workOrderIds')
+      .populate('issuedBy', 'firstName lastName email');
+
+    if (!challan) throw new NotFoundError(`Scrap challan '${id}' not found`);
+    return challan;
+  }
+
+  /**
+   * Get consumption sheet for Scrap Challan
+   */
+  async getScrapChallanConsumptionSheet(id: string) {
+    const challan = await ScrapChallanModel.findById(id)
+      .populate('customerId')
+      .populate('workOrderIds');
+    if (!challan) throw new NotFoundError(`Scrap challan '${id}' not found`);
+
+    if (challan.consumptionSheet && Object.keys(challan.consumptionSheet).length > 0) {
+      return challan.consumptionSheet;
+    }
+
+    const sheet = await this.computeScrapConsumptionSheet(
+      challan.customerId,
+      challan.workOrderIds as any[],
+      challan.items as any[],
+      {
+        challanNumber: challan.challanNumber,
+        challanDate: challan.challanDate,
+        vehicleNumber: challan.vehicleNumber,
+        remarks: challan.remarks,
+        placeOfSupply: challan.placeOfSupply,
+      },
+    );
+
+    challan.consumptionSheet = sheet;
+    await challan.save();
+    return sheet;
+  }
+
+  /**
+   * Update / Save manual adjustments to Scrap Consumption Sheet
+   */
+  async updateScrapChallanConsumptionSheet(id: string, sheetData: Record<string, any>) {
+    const challan = await ScrapChallanModel.findById(id);
+    if (!challan) throw new NotFoundError(`Scrap challan '${id}' not found`);
+
+    challan.consumptionSheet = sheetData;
+    challan.markModified('consumptionSheet');
+    await challan.save();
+    return challan.consumptionSheet;
   }
 }
 

@@ -567,9 +567,20 @@ export class PackingService {
       throw new BadRequestError('Work order does not belong to the selected customer');
     }
 
-    if (workOrder.status === 'CANCELLED' || workOrder.status === 'COMPLETED') {
+    if (workOrder.status !== 'COMPLETED') {
       throw new BadRequestError(
-        `Cannot create packing list for work order with status '${workOrder.status}'`,
+        `Cannot create packing list for work order '${workOrder.workOrderNumber}'. Order must be marked as COMPLETED before packing drums. Current status: '${workOrder.status}'`,
+      );
+    }
+
+    // Check if work order has already been utilized to make a packing list
+    const existingActiveList = await PackingListModel.findOne({
+      workOrderId: workOrder._id,
+      status: { $ne: 'CANCELLED' },
+    });
+    if (existingActiveList) {
+      throw new BadRequestError(
+        `Work order '${workOrder.workOrderNumber}' has already been utilized in Packing List '${existingActiveList.packingListNumber}'. It cannot be packed again.`,
       );
     }
 

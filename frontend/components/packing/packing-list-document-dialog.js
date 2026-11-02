@@ -139,15 +139,15 @@ export function PackingListDocumentDialog({ open, onOpenChange, documentData: pr
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-4xl max-h-[92vh] overflow-y-auto bg-white p-0 border border-slate-300 shadow-2xl">
                 {/* Top Control Bar */}
-                <div className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between sticky top-0 z-10 print:hidden">
+                <div className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-10 print:hidden">
                     <div className="flex items-center gap-2.5">
-                        <div className="p-1.5 bg-orange-500/20 text-orange-400 rounded-lg">
-                            <Package className="w-5 h-5" />
+                        <div className="p-2 bg-slate-100 text-slate-800 rounded-lg">
+                            <Package className="w-4 h-4" />
                         </div>
                         <div>
-                            <DialogTitle className="text-base font-bold text-white">Official Packing List</DialogTitle>
-                            <p className="text-xs text-slate-400">
-                                Challan Ref: {header?.challanNumber || "Pending"} • Packing No: {header?.packingNumber || "Pending"}
+                            <DialogTitle className="text-sm font-semibold text-slate-900">Packing List Preview</DialogTitle>
+                            <p className="text-xs text-slate-500">
+                                {header?.packingNumber ? `PL: ${header.packingNumber}` : 'Draft'} {header?.challanNumber ? `• DC: ${header.challanNumber}` : ''}
                             </p>
                         </div>
                     </div>
@@ -157,18 +157,18 @@ export function PackingListDocumentDialog({ open, onOpenChange, documentData: pr
                             onClick={handlePrint}
                             disabled={loading || !data}
                             size="sm"
-                            className="bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs gap-1.5 shadow-sm cursor-pointer"
+                            className="bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs gap-1.5 shadow-xs cursor-pointer h-8"
                         >
                             <Printer className="w-3.5 h-3.5" />
-                            Print / Save PDF
+                            Print / PDF
                         </Button>
                     </div>
                 </div>
 
                 {loading ? (
                     <div className="py-24 text-center text-slate-500 space-y-3">
-                        <RefreshCw className="w-8 h-8 animate-spin mx-auto text-orange-600" />
-                        <p className="text-xs font-semibold">Loading official Packing List document...</p>
+                        <RefreshCw className="w-6 h-6 animate-spin mx-auto text-slate-600" />
+                        <p className="text-xs">Loading document...</p>
                     </div>
                 ) : !data ? (
                     <div className="py-20 text-center text-slate-400 text-xs">No document data available.</div>

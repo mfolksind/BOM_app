@@ -55,6 +55,27 @@ outboundChallanRoutes.post('/', validate(createOutboundChallanSchema), (req, res
 outboundChallanRoutes.get('/', validate(listOutboundChallansQuerySchema), (req, res, next) =>
   dispatchController.listOutboundChallans(req, res, next),
 );
+// Scrap Return Challans (/api/v1/outbound-challans/scrap)
+outboundChallanRoutes.get('/scrap/active-inbound-challans', (req, res, next) =>
+  dispatchController.getActiveInboundChallansForScrap(req, res, next),
+);
+outboundChallanRoutes.post('/scrap', (req, res, next) =>
+  dispatchController.createScrapChallan(req, res, next),
+);
+outboundChallanRoutes.get('/scrap', (req, res, next) =>
+  dispatchController.listScrapChallans(req, res, next),
+);
+outboundChallanRoutes.get('/scrap/:id', (req, res, next) =>
+  dispatchController.getScrapChallanById(req, res, next),
+);
+outboundChallanRoutes.get('/scrap/:id/consumption-sheet', (req, res, next) =>
+  dispatchController.getScrapChallanConsumptionSheet(req, res, next),
+);
+outboundChallanRoutes.put('/scrap/:id/consumption-sheet', (req, res, next) =>
+  dispatchController.updateScrapChallanConsumptionSheet(req, res, next),
+);
+
+// Specific Outbound Challan by ID
 outboundChallanRoutes.get('/:id', validate(outboundChallanIdParamSchema), (req, res, next) =>
   dispatchController.getOutboundChallanById(req, res, next),
 );

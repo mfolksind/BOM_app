@@ -121,7 +121,7 @@ export class BomService {
         ? new mongoose.Types.ObjectId(item.processStageId)
         : undefined,
       quantityPerUnit: item.quantityPerUnit,
-      scrapTolerancePercentage: item.scrapTolerancePercentage,
+      scrapTolerancePercentage: item.scrapTolerancePercentage ?? 0,
       isMandatory: item.isMandatory ?? true,
       stageSequence: item.stageSequence ?? 1,
       notes: item.notes,
@@ -257,7 +257,7 @@ export class BomService {
           ? new mongoose.Types.ObjectId(item.processStageId)
           : undefined,
         quantityPerUnit: item.quantityPerUnit,
-        scrapTolerancePercentage: item.scrapTolerancePercentage,
+        scrapTolerancePercentage: item.scrapTolerancePercentage ?? 0,
         isMandatory: item.isMandatory ?? true,
         stageSequence: item.stageSequence ?? 1,
         notes: item.notes,

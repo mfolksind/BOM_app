@@ -79,7 +79,6 @@ export function EditBomDialog({
               items: items.map((itm) => ({
                 materialId: itm.materialId?._id || itm.materialId,
                 quantityPerUnit: itm.quantityPerUnit,
-                scrapTolerancePercentage: itm.scrapTolerancePercentage || 0,
                 stageSequence: itm.stageSequence || 1,
                 notes: itm.notes || '',
               })),
@@ -103,7 +102,6 @@ export function EditBomDialog({
         {
           materialId: '',
           quantityPerUnit: '',
-          scrapTolerancePercentage: 0,
           stageSequence: prev.items.length + 1,
           notes: '',
         },
@@ -167,7 +165,6 @@ export function EditBomDialog({
         items: formData.items.map((itm) => ({
           materialId: itm.materialId,
           quantityPerUnit: parseFloat(itm.quantityPerUnit),
-          scrapTolerancePercentage: parseFloat(itm.scrapTolerancePercentage) || 0,
           stageSequence: parseInt(itm.stageSequence, 10) || 1,
           notes: itm.notes?.trim() || undefined,
           isMandatory: true,
@@ -383,7 +380,7 @@ export function EditBomDialog({
                           />
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2.5">
+                        <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider truncate block">
                               Norm Qty {selectedMat ? `(${selectedMat.baseUnit})` : ''} *
@@ -397,22 +394,6 @@ export function EditBomDialog({
                               onChange={(e) => handleItemChange(index, 'quantityPerUnit', e.target.value)}
                               className="h-9 text-xs bg-white font-medium"
                               required
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider truncate block">
-                              Scrap %
-                            </Label>
-                            <Input
-                              type="number"
-                              step="any"
-                              min="0"
-                              max="100"
-                              placeholder="0"
-                              value={item.scrapTolerancePercentage}
-                              onChange={(e) => handleItemChange(index, 'scrapTolerancePercentage', e.target.value)}
-                              className="h-9 text-xs bg-white"
                             />
                           </div>
 
@@ -502,7 +483,6 @@ export function EditBomDialog({
                       <TableHead className="w-10 text-center text-xs font-semibold">#</TableHead>
                       <TableHead className="text-xs font-semibold">Material</TableHead>
                       <TableHead className="text-right text-xs font-semibold">Rate</TableHead>
-                      <TableHead className="text-right text-xs font-semibold">Scrap %</TableHead>
                       <TableHead className="text-xs font-semibold">Process Notes</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -522,15 +502,6 @@ export function EditBomDialog({
                         </TableCell>
                         <TableCell className="text-right font-bold text-slate-900 text-xs">
                           {item.quantityPerUnit} <span className="font-normal text-[11px] text-slate-500">{item.materialId?.baseUnit || 'KG'}</span>
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {item.scrapTolerancePercentage ? (
-                            <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded text-[11px]">
-                              +{item.scrapTolerancePercentage}%
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">0%</span>
-                          )}
                         </TableCell>
                         <TableCell className="text-xs text-slate-600">
                           {item.notes || <span className="text-slate-400 italic">Standard</span>}

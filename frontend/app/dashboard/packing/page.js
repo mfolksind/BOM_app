@@ -5,19 +5,19 @@ import { useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 import { CreateDrumDialog } from "@/components/packing/create-drum-dialog";
 import { EditDrumDialog } from "@/components/packing/edit-drum-dialog";
 import { ReceiveCustomerDrumsDialog } from "@/components/packing/receive-customer-drums-dialog";
 import { CreatePackingListDialog } from "@/components/packing/create-packing-list-dialog";
 import { PackingListDocumentDialog } from "@/components/packing/packing-list-document-dialog";
-import { MaterialConsumptionSheetDialog } from "@/components/dispatch/material-consumption-sheet-dialog";
 
 import {
     Package,
@@ -29,15 +29,12 @@ import {
     Boxes,
     Truck,
     Layers,
-    ArrowRight,
     CheckCircle2,
-    MoreVertical,
     Building2,
-    FileCheck2,
-    Clock,
     ChevronDown,
     ChevronUp,
     AlertTriangle,
+    FilterX,
 } from "lucide-react";
 
 export default function PackingPage() {
@@ -49,6 +46,9 @@ export default function PackingPage() {
     // Packing Lists State
     const [packingLists, setPackingLists] = useState([]);
     const [loadingLists, setLoadingLists] = useState(true);
+    const [packingSearch, setPackingSearch] = useState("");
+    const [packingCustomerFilter, setPackingCustomerFilter] = useState("ALL");
+    const [packingStatusFilter, setPackingStatusFilter] = useState("ALL");
 
     // Drums State
     const [drums, setDrums] = useState([]);
@@ -71,7 +71,6 @@ export default function PackingPage() {
 
     // Document Previews
     const [previewPackingListId, setPreviewPackingListId] = useState(null);
-    const [previewChallanId, setPreviewChallanId] = useState(null);
     const [selectedPackingCustomer, setSelectedPackingCustomer] = useState(null);
     const [selectedPackingCustomerName, setSelectedPackingCustomerName] = useState("");
 
@@ -94,7 +93,7 @@ export default function PackingPage() {
     const fetchPackingLists = useCallback(async () => {
         setLoadingLists(true);
         try {
-            const res = await apiClient("/packing-lists?limit=50");
+            const res = await apiClient("/packing-lists?limit=100");
             if (res.data) {
                 setPackingLists(res.data.items || res.data || []);
             }
@@ -132,6 +131,44 @@ export default function PackingPage() {
         fetchDrums();
     }, [fetchPackingLists, fetchDrums]);
 
+    // Options for SearchableSelect
+    const customerFilterOptions = useMemo(() => {
+        const list = [{ value: "ALL", label: "All Customers" }];
+        (customers || []).forEach((c) => {
+            list.push({
+                value: String(c._id),
+                label: c.name,
+                code: c.code || "CUST",
+                subLabel: c.phone || c.email || "",
+            });
+        });
+        return list;
+    }, [customers]);
+
+    // Filtered packing lists
+    const filteredPackingLists = useMemo(() => {
+        return packingLists.filter((pl) => {
+            if (packingSearch.trim()) {
+                const s = packingSearch.trim().toLowerCase();
+                const plNum = (pl.packingListNumber || "").toLowerCase();
+                const woNum = (pl.workOrderId?.workOrderNumber || pl.workOrderNumber || "").toLowerCase();
+                const cName = (pl.customerId?.name || "").toLowerCase();
+                const size = (pl.sizeDescription || pl.productId?.code || "").toLowerCase();
+                if (!plNum.includes(s) && !woNum.includes(s) && !cName.includes(s) && !size.includes(s)) {
+                    return false;
+                }
+            }
+            if (packingCustomerFilter !== "ALL") {
+                const cId = pl.customerId?._id || pl.customerId;
+                if (String(cId) !== String(packingCustomerFilter)) return false;
+            }
+            if (packingStatusFilter !== "ALL") {
+                if (pl.status !== packingStatusFilter) return false;
+            }
+            return true;
+        });
+    }, [packingLists, packingSearch, packingCustomerFilter, packingStatusFilter]);
+
     // Handle Packing List Lifecycle Status Update: DRAFT -> PACKED
     const handlePackList = async (id) => {
         try {
@@ -143,29 +180,6 @@ export default function PackingPage() {
             }
         } catch (err) {
             toast.error("Failed to finalize packing list", { description: err.message });
-        }
-    };
-
-    // Handle Generating Delivery Challan with Consumption Sheet
-    const handleGenerateChallan = async (pl) => {
-        try {
-            const res = await apiClient(`/packing-lists/${pl._id}/generate-challan`, {
-                method: "POST",
-                body: JSON.stringify({
-                    deliveryPlace: "Client Site Yard",
-                    transportMode: "BY_ROAD",
-                    remarks: `Delivery challan for packed cable list ${pl.packingListNumber}`,
-                }),
-            });
-            if (res.data) {
-                toast.success(`Outbound Challan ${res.data.challanNumber} generated successfully!`);
-                fetchPackingLists();
-                if (res.data._id) {
-                    setPreviewChallanId(res.data._id);
-                }
-            }
-        } catch (err) {
-            toast.error("Failed to generate challan", { description: err.message });
         }
     };
 
@@ -182,8 +196,8 @@ export default function PackingPage() {
                 ? customerObj?._id
                     ? String(customerObj._id)
                     : drum.customerId
-                        ? String(drum.customerId)
-                        : "CUSTOMER_OTHER"
+                      ? String(drum.customerId)
+                      : "CUSTOMER_OTHER"
                 : "FACTORY_OWNED";
 
             const name = isCust
@@ -235,33 +249,27 @@ export default function PackingPage() {
     };
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-6">
             {/* Top Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
-                        <Boxes className="w-7 h-7 text-orange-600" />
-                        Cable Drums &amp; Packaging Operations
-                    </h1>
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900">Packing &amp; Drum Operations</h1>
                     <p className="text-sm text-slate-500 mt-1">
-                        Manage customer returnable empty drums received under Inbound Challan/RGP, allocate cable lengths, and generate
-                        Packing Lists &amp; Delivery Challans.
+                        Customer returnable drums (RGP), cable drum winding, and packing list dispatch management.
                     </p>
                 </div>
 
                 <div className="flex items-center gap-2.5 flex-wrap">
-                    {/* Receive Customer Returnable Drums Action */}
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setReceiveDrumsOpen(true)}
-                        className="h-9 px-3 gap-1.5 border-orange-200 text-orange-700 bg-orange-50/50 hover:bg-orange-100/60 shadow-xs cursor-pointer font-medium"
+                        className="h-10 px-3.5 gap-2 border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm cursor-pointer font-medium text-sm"
                     >
-                        <Truck className="w-4 h-4" />
-                        Receive Customer Drums (Inbound Challan)
+                        <Truck className="w-4 h-4 text-slate-500" />
+                        Receive Drums (RGP)
                     </Button>
 
-                    {/* Pack Cable into Drums Action */}
                     <Button
                         size="sm"
                         onClick={() => {
@@ -269,7 +277,7 @@ export default function PackingPage() {
                             setSelectedPackingCustomerName("");
                             setCreatePackingOpen(true);
                         }}
-                        className="h-9 px-3.5 gap-1.5 bg-orange-600 hover:bg-orange-700 text-white shadow-xs cursor-pointer font-medium"
+                        className="h-10 px-4 gap-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm shadow-sm cursor-pointer"
                     >
                         <Plus className="w-4 h-4" />
                         Pack Cable into Drums
@@ -284,62 +292,81 @@ export default function PackingPage() {
                             toast.success("Packaging data updated");
                         }}
                         disabled={loadingLists || loadingDrums}
-                        className="h-9 px-3 gap-1.5 border-slate-200 text-slate-700 bg-white shadow-xs cursor-pointer"
+                        className="h-10 px-3 gap-1.5 border-slate-200 text-slate-700 bg-white shadow-sm cursor-pointer"
+                        title="Refresh"
                     >
-                        <RefreshCw className={`w-3.5 h-3.5 ${loadingLists || loadingDrums ? "animate-spin" : ""}`} />
-                        Refresh
+                        <RefreshCw className={`w-4 h-4 ${loadingLists || loadingDrums ? "animate-spin" : ""}`} />
                     </Button>
                 </div>
             </div>
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                    <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">Total Cable Drums</span>
-                    <div className="text-2xl font-bold font-mono text-slate-900">{drums.length}</div>
-                    <span className="text-[10px] text-slate-400 mt-1 block">Registered in Inventory</span>
-                </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card className="border border-slate-200/90 shadow-sm bg-white">
+                    <CardHeader className="p-4 pb-2">
+                        <CardDescription className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Total Drums
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                        <div className="text-2xl font-bold font-mono text-slate-900">{drums.length}</div>
+                        <span className="text-[11px] text-slate-400 mt-1 block">Registered in Yard</span>
+                    </CardContent>
+                </Card>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                    <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
-                        Customer Yard Drums
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-slate-900">
-                        {drums.filter((d) => d.customerId || d.ownership === "CUSTOMER_SUPPLIED" || d.ownership === "CUSTOMER").length}
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-1 block">
-                        Across {companyGroups.filter((g) => g.isCustomer).length} Customer Companies
-                    </span>
-                </div>
+                <Card className="border border-slate-200/90 shadow-sm bg-white">
+                    <CardHeader className="p-4 pb-2">
+                        <CardDescription className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Customer Drums
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                        <div className="text-2xl font-bold font-mono text-slate-900">
+                            {drums.filter((d) => d.customerId || d.ownership === "CUSTOMER_SUPPLIED" || d.ownership === "CUSTOMER").length}
+                        </div>
+                        <span className="text-[11px] text-slate-400 mt-1 block">
+                            Across {companyGroups.filter((g) => g.isCustomer).length} Customer Companies
+                        </span>
+                    </CardContent>
+                </Card>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                    <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
-                        Available Empty Drums
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-emerald-700">
-                        {drums.filter((d) => d.status === "AVAILABLE" || d.status === "EMPTY" || !d.status).length}
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-1 block">Ready for Cable Winding</span>
-                </div>
+                <Card className="border border-slate-200/90 shadow-sm bg-white">
+                    <CardHeader className="p-4 pb-2">
+                        <CardDescription className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Available Empty
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                        <div className="text-2xl font-bold font-mono text-emerald-700">
+                            {drums.filter((d) => d.status === "AVAILABLE" || d.status === "EMPTY" || !d.status).length}
+                        </div>
+                        <span className="text-[11px] text-slate-400 mt-1 block">Ready for Cable Winding</span>
+                    </CardContent>
+                </Card>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                    <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block mb-1">
-                        Active Packing Runs
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-slate-900">{packingLists.length}</div>
-                    <span className="text-[10px] text-slate-400 mt-1 block">Packing Lists Recorded</span>
-                </div>
+                <Card className="border border-slate-200/90 shadow-sm bg-white">
+                    <CardHeader className="p-4 pb-2">
+                        <CardDescription className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Packing Lists
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                        <div className="text-2xl font-bold font-mono text-slate-900">{packingLists.length}</div>
+                        <span className="text-[11px] text-slate-400 mt-1 block">Packing Runs Recorded</span>
+                    </CardContent>
+                </Card>
             </div>
 
-            {/* Tabs Bar */}
+            {/* Navigation Tabs */}
             <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 shadow-xs">
                 <button
                     type="button"
                     onClick={() => setActiveTab("packing-lists")}
-                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${activeTab === "packing-lists"
-                        ? "border-orange-600 text-orange-700"
-                        : "border-transparent text-slate-500 hover:text-slate-900"
-                        }`}
+                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+                        activeTab === "packing-lists"
+                            ? "border-slate-900 text-slate-900"
+                            : "border-transparent text-slate-500 hover:text-slate-900"
+                    }`}
                 >
                     <Package className="w-4 h-4" />
                     Packing Lists ({packingLists.length})
@@ -348,27 +375,97 @@ export default function PackingPage() {
                 <button
                     type="button"
                     onClick={() => setActiveTab("drums")}
-                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${activeTab === "drums"
-                        ? "border-orange-600 text-orange-700"
-                        : "border-transparent text-slate-500 hover:text-slate-900"
-                        }`}
+                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+                        activeTab === "drums" ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-900"
+                    }`}
                 >
                     <Layers className="w-4 h-4" />
-                    Cable Drums &amp; Ref RGP Inventory ({drums.length})
+                    Cable Drums &amp; RGP Inventory ({drums.length})
                 </button>
             </div>
 
             {/* TAB 1: PACKING LISTS */}
             {activeTab === "packing-lists" && (
-                <div className="bg-white rounded-b-xl border border-slate-200 border-t-0 shadow-xs overflow-hidden">
+                <Card className="border border-slate-200/90 shadow-sm bg-white overflow-hidden rounded-t-none border-t-0">
+                    <CardHeader className="pb-4 border-b border-slate-100 bg-slate-50/40">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <CardTitle className="text-base font-semibold text-slate-900">Packing Runs &amp; Dispatches</CardTitle>
+                                <CardDescription className="text-xs text-slate-500 mt-0.5">
+                                    {filteredPackingLists.length} of {packingLists.length} packing lists shown
+                                </CardDescription>
+                            </div>
+
+                            {/* Filter Toolbar with SearchableSelect */}
+                            <div className="flex flex-wrap items-center gap-2.5">
+                                <div className="relative w-56">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                                    <Input
+                                        placeholder="Search PL, WO, cable..."
+                                        value={packingSearch}
+                                        onChange={(e) => setPackingSearch(e.target.value)}
+                                        className="pl-9 h-9 text-xs bg-white border-slate-200"
+                                    />
+                                </div>
+
+                                <div className="w-48">
+                                    <SearchableSelect
+                                        options={customerFilterOptions}
+                                        value={packingCustomerFilter}
+                                        onChange={setPackingCustomerFilter}
+                                        placeholder="All Customers"
+                                        searchPlaceholder="Search customer..."
+                                        className="h-9 text-xs bg-white"
+                                    />
+                                </div>
+
+                                <Select value={packingStatusFilter} onValueChange={setPackingStatusFilter}>
+                                    <SelectTrigger className="h-9 text-xs w-32 bg-white border-slate-200">
+                                        <SelectValue placeholder="Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL" className="text-xs">
+                                            All Status
+                                        </SelectItem>
+                                        <SelectItem value="DRAFT" className="text-xs">
+                                            Draft
+                                        </SelectItem>
+                                        <SelectItem value="PACKED" className="text-xs">
+                                            Packed
+                                        </SelectItem>
+                                        <SelectItem value="CHALLAN_CREATED" className="text-xs">
+                                            Challan Created
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+
+                                {(packingSearch || packingCustomerFilter !== "ALL" || packingStatusFilter !== "ALL") && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                            setPackingSearch("");
+                                            setPackingCustomerFilter("ALL");
+                                            setPackingStatusFilter("ALL");
+                                        }}
+                                        className="h-9 px-2 text-xs text-slate-500 hover:text-slate-900 gap-1"
+                                    >
+                                        <FilterX className="w-3.5 h-3.5" />
+                                        Reset
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </CardHeader>
+
                     <Table>
                         <TableHeader className="bg-slate-50/80 border-b border-slate-200">
                             <TableRow>
                                 <TableHead className="text-xs font-semibold text-slate-700">Packing List No</TableHead>
                                 <TableHead className="text-xs font-semibold text-slate-700">Customer &amp; Work Order</TableHead>
-                                <TableHead className="text-xs font-semibold text-slate-700">Cable Size (SIZE)</TableHead>
-                                <TableHead className="text-xs font-semibold text-slate-700 text-right">Total Packed Length</TableHead>
-                                {/* <TableHead className="text-xs font-semibold text-slate-700 text-center">Drums</TableHead> */}
+                                <TableHead className="text-xs font-semibold text-slate-700">Cable Size</TableHead>
+                                <TableHead className="text-xs font-semibold text-slate-700 text-right">Packed Length</TableHead>
+                                <TableHead className="text-xs font-semibold text-slate-700 text-center">Drums</TableHead>
                                 <TableHead className="text-xs font-semibold text-slate-700">Status</TableHead>
                                 <TableHead className="text-right text-xs font-semibold text-slate-700">Actions</TableHead>
                             </TableRow>
@@ -378,23 +475,24 @@ export default function PackingPage() {
                             {loadingLists ? (
                                 <TableRow>
                                     <TableCell colSpan={7} className="py-12 text-center text-xs text-slate-400">
-                                        <RefreshCw className="w-5 h-5 animate-spin mx-auto text-orange-600 mb-2" />
+                                        <RefreshCw className="w-5 h-5 animate-spin mx-auto text-slate-400 mb-2" />
                                         Loading packing lists...
                                     </TableCell>
                                 </TableRow>
-                            ) : packingLists.length === 0 ? (
+                            ) : filteredPackingLists.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={7} className="py-14 text-center text-slate-500 text-xs">
                                         <Package className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                                        <p className="font-semibold text-slate-800">No packing lists created yet.</p>
+                                        <p className="font-semibold text-slate-800">No packing lists found.</p>
                                         <p className="text-slate-400 mt-1">
-                                            Click <strong>&quot;Pack Cable into Drums&quot;</strong> to pack cables from a Production Order
-                                            into drums.
+                                            {packingLists.length === 0
+                                                ? 'Click "Pack Cable into Drums" to create your first packing list.'
+                                                : "Try clearing filters to see more results."}
                                         </p>
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                packingLists.map((pl) => {
+                                filteredPackingLists.map((pl) => {
                                     const isShortageDraft =
                                         pl.status === "DRAFT" && (pl.remarks?.includes("SHORTAGE") || pl.remarks?.includes("Pending"));
 
@@ -408,66 +506,41 @@ export default function PackingPage() {
                                             </TableCell>
 
                                             <TableCell className="py-3">
-                                                <div className="font-semibold text-xs text-slate-900">
+                                                <div className="font-medium text-xs text-slate-900">
                                                     {pl.customerId?.name || "Customer"}
                                                 </div>
-                                                <div className="text-[11px] font-mono text-indigo-700">
+                                                <div className="text-[11px] font-mono text-slate-500">
                                                     WO: {pl.workOrderId?.workOrderNumber || pl.workOrderNumber || "—"}
                                                 </div>
                                             </TableCell>
 
-                                            <TableCell className="py-3 font-mono font-semibold text-xs text-slate-800">
+                                            <TableCell className="py-3 font-mono text-xs text-slate-800">
                                                 {pl.sizeDescription || pl.productId?.code || "4CX35 SQMM A2XFY"}
                                             </TableCell>
 
-                                            <TableCell className="py-3 text-right font-mono font-bold text-xs text-indigo-700">
+                                            <TableCell className="py-3 text-right font-mono font-semibold text-xs text-slate-900">
                                                 {pl.totalLengthMeters ? pl.totalLengthMeters.toLocaleString("en-IN") : "0.0"} m
                                             </TableCell>
-                                            <TableCell className="py-3">
-                                                <div className="flex flex-col gap-1 items-start">
-                                                    <Badge variant="outline" className="font-mono text-xs bg-slate-50 font-bold text-slate-800">
-                                                        {pl.totalDrums || pl.drumNumbers?.length || pl.lines?.length || 0} drums
-                                                    </Badge>
-                                                    {/* {Array.isArray(pl.drumNumbers) && pl.drumNumbers.length > 0 ? (
-                                                        <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
-                                                            {pl.drumNumbers.map((dNo, idx) => (
-                                                                <span
-                                                                    key={idx}
-                                                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
-                                                                    title={`Drum #${dNo}`}
-                                                                >
-                                                                    {dNo}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    ) : Array.isArray(pl.lines) && pl.lines.length > 0 ? (
-                                                        <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
-                                                            {pl.lines.map((l, idx) => (
-                                                                <span
-                                                                    key={idx}
-                                                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
-                                                                    title={`Drum #${l.drumNumber}`}
-                                                                >
-                                                                    {l.drumNumber}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    ) : null} */}
-                                                </div>
+                                            <TableCell className="py-3 text-center">
+                                                <Badge
+                                                    variant="outline"
+                                                    className="font-mono text-xs bg-slate-50 font-medium text-slate-700"
+                                                >
+                                                    {pl.totalDrums || pl.drumNumbers?.length || pl.lines?.length || 0} drums
+                                                </Badge>
                                             </TableCell>
 
                                             <TableCell className="py-3">
                                                 <div className="space-y-1">
-                                                    <span
-                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${pl.status === "CHALLAN_CREATED"
-                                                            ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                                            : pl.status === "PACKED"
-                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                : "bg-amber-50 text-amber-700 border border-amber-200"
-                                                            }`}
-                                                    >
-                                                        {pl.status}
-                                                    </span>
+                                                    {pl.status === "CHALLAN_CREATED" ? (
+                                                        <Badge className="bg-blue-50 text-blue-700 border-blue-200">Challan Created</Badge>
+                                                    ) : pl.status === "PACKED" ? (
+                                                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Packed</Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
+                                                            Draft
+                                                        </Badge>
+                                                    )}
                                                     {isShortageDraft && (
                                                         <div className="flex items-center gap-1 text-[10px] text-amber-800 font-medium">
                                                             <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
@@ -479,53 +552,24 @@ export default function PackingPage() {
 
                                             <TableCell className="py-3 text-right">
                                                 <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                                    {/* Image 1 Document Button */}
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
                                                         onClick={() => setPreviewPackingListId(pl._id)}
-                                                        className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-orange-700 hover:border-orange-300"
+                                                        className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-50 border-slate-200"
                                                     >
-                                                        <FileText className="w-3.5 h-3.5 text-orange-600" />
+                                                        <FileText className="w-3.5 h-3.5 text-slate-500" />
                                                         Packing List
                                                     </Button>
 
-                                                    {/* Step 1 Completion: Finalize DRAFT to PACKED */}
                                                     {pl.status === "DRAFT" && (
                                                         <Button
                                                             size="sm"
                                                             onClick={() => handlePackList(pl._id)}
-                                                            className="h-8 text-xs px-2.5 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                                            className="h-8 text-xs px-2.5 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-medium"
                                                         >
                                                             <CheckCircle2 className="w-3.5 h-3.5" />
-                                                            Finalize &amp; Seal Drums
-                                                        </Button>
-                                                    )}
-
-                                                    {/* Step 2: Generate Delivery Challan with Consumption Sheet   */}
-                                                    {pl.status === "PACKED" && (
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => handleGenerateChallan(pl)}
-                                                            className="h-8 text-xs px-2.5 gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-xs"
-                                                        >
-                                                            <Truck className="w-3.5 h-3.5" />
-                                                            Create Outbound Challan
-                                                        </Button>
-                                                    )}
-
-                                                    {/* If Challan Already Created, allow viewing Image 2 */}
-                                                    {pl.status === "CHALLAN_CREATED" && pl.outboundChallanId && (
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() =>
-                                                                setPreviewChallanId(pl.outboundChallanId?._id || pl.outboundChallanId)
-                                                            }
-                                                            className="h-8 text-xs px-2.5 gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
-                                                        >
-                                                            <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
-                                                            Consumption Sheet
+                                                            Finalize &amp; Seal
                                                         </Button>
                                                     )}
                                                 </div>
@@ -536,7 +580,7 @@ export default function PackingPage() {
                             )}
                         </TableBody>
                     </Table>
-                </div>
+                </Card>
             )}
 
             {/* TAB 2: CABLE DRUMS & REF RGP INVENTORY (COMPANY-WISE) */}
@@ -549,17 +593,19 @@ export default function PackingPage() {
                             <button
                                 type="button"
                                 onClick={() => setDrumViewMode("company")}
-                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${drumViewMode === "company" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                                    }`}
+                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                    drumViewMode === "company" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                                }`}
                             >
-                                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                                <Building2 className="w-3.5 h-3.5 text-slate-600" />
                                 Company-Wise View ({companyGroups.length})
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setDrumViewMode("flat")}
-                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${drumViewMode === "flat" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                                    }`}
+                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                                    drumViewMode === "flat" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                                }`}
                             >
                                 <Layers className="w-3.5 h-3.5 text-slate-600" />
                                 All Drums Flat List
@@ -568,18 +614,18 @@ export default function PackingPage() {
 
                         {/* Search & Filters */}
                         <div className="flex flex-wrap items-center gap-2.5">
-                            <div className="relative w-full sm:w-64">
-                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <div className="relative w-full sm:w-56">
+                                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <Input
-                                    placeholder="Search Drum No or Ref RGP..."
+                                    placeholder="Search Drum No or RGP..."
                                     value={drumSearch}
                                     onChange={(e) => setDrumSearch(e.target.value)}
-                                    className="pl-9 h-9 text-xs bg-slate-50/50"
+                                    className="pl-9 h-9 text-xs bg-white border-slate-200"
                                 />
                             </div>
 
                             <Select value={drumStatusFilter} onValueChange={setDrumStatusFilter}>
-                                <SelectTrigger className="w-[140px] h-9 text-xs">
+                                <SelectTrigger className="w-32 h-9 text-xs bg-white border-slate-200">
                                     <SelectValue placeholder="All Status" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -602,7 +648,7 @@ export default function PackingPage() {
                             </Select>
 
                             <Select value={drumOwnershipFilter} onValueChange={setDrumOwnershipFilter}>
-                                <SelectTrigger className="w-[140px] h-9 text-xs">
+                                <SelectTrigger className="w-32 h-9 text-xs bg-white border-slate-200">
                                     <SelectValue placeholder="All Ownership" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -618,29 +664,16 @@ export default function PackingPage() {
                                 </SelectContent>
                             </Select>
 
-                            <Select value={drumCustomerFilter} onValueChange={setDrumCustomerFilter}>
-                                <SelectTrigger className="w-[170px] h-9 text-xs">
-                                    <SelectValue placeholder="All Customers">
-                                        {(() => {
-                                            if (drumCustomerFilter === "ALL") return "All Customers";
-                                            const c = (Array.isArray(customers) ? customers : []).find(
-                                                (cust) => String(cust._id) === String(drumCustomerFilter),
-                                            );
-                                            return c ? `${c.name} (${c.code || "CUST"})` : "Customer";
-                                        })()}
-                                    </SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL" className="text-xs">
-                                        All Customers
-                                    </SelectItem>
-                                    {(Array.isArray(customers) ? customers : []).map((c) => (
-                                        <SelectItem key={c._id} value={c._id} className="text-xs">
-                                            {c.name} ({c.code || "CUST"})
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <div className="w-48">
+                                <SearchableSelect
+                                    options={customerFilterOptions}
+                                    value={drumCustomerFilter}
+                                    onChange={setDrumCustomerFilter}
+                                    placeholder="All Customers"
+                                    searchPlaceholder="Search customer..."
+                                    className="h-9 text-xs bg-white"
+                                />
+                            </div>
 
                             <Button
                                 size="sm"
@@ -754,9 +787,9 @@ export default function PackingPage() {
                                                                 size="sm"
                                                                 variant="outline"
                                                                 onClick={() => setReceiveDrumsOpen(true)}
-                                                                className="h-8 text-xs px-2.5 gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                                                className="h-8 text-xs px-2.5 gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                                                             >
-                                                                <Truck className="w-3.5 h-3.5 text-orange-600" />
+                                                                <Truck className="w-3.5 h-3.5 text-slate-500" />
                                                                 Receive Drums
                                                             </Button>
 
@@ -767,10 +800,10 @@ export default function PackingPage() {
                                                                     setSelectedPackingCustomerName(group.name);
                                                                     setCreatePackingOpen(true);
                                                                 }}
-                                                                className="h-8 text-xs px-2.5 gap-1.5 bg-orange-600 hover:bg-orange-700 text-white font-medium shadow-xs cursor-pointer"
+                                                                className="h-8 text-xs px-2.5 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-xs cursor-pointer"
                                                             >
                                                                 <Package className="w-3.5 h-3.5" />
-                                                                Pack Cable into Drums
+                                                                Pack Cable
                                                             </Button>
                                                         </>
                                                     )}
@@ -814,8 +847,8 @@ export default function PackingPage() {
                                                                 <TableCell className="py-2.5 font-mono text-xs text-slate-700">
                                                                     {drum.sizeDescription ||
                                                                         (drum.flangeDiameterMm &&
-                                                                            drum.barrelDiameterMm &&
-                                                                            drum.traverseWidthMm
+                                                                        drum.barrelDiameterMm &&
+                                                                        drum.traverseWidthMm
                                                                             ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
                                                                             : "44X16X24")}
                                                                 </TableCell>
@@ -833,14 +866,15 @@ export default function PackingPage() {
                                                                 </TableCell>
                                                                 <TableCell className="py-2.5">
                                                                     <span
-                                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${drum.status === "AVAILABLE" || drum.status === "EMPTY"
-                                                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                            : drum.status === "PACKED" || drum.status === "IN_USE"
-                                                                                ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                                                                : drum.status === "DISPATCHED"
+                                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
+                                                                            drum.status === "AVAILABLE" || drum.status === "EMPTY"
+                                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                                                : drum.status === "PACKED" || drum.status === "IN_USE"
+                                                                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                                                                  : drum.status === "DISPATCHED"
                                                                                     ? "bg-blue-50 text-blue-700 border border-blue-200"
                                                                                     : "bg-slate-100 text-slate-600"
-                                                                            }`}
+                                                                        }`}
                                                                     >
                                                                         {drum.status}
                                                                     </span>
@@ -953,14 +987,15 @@ export default function PackingPage() {
                                                 </TableCell>
                                                 <TableCell className="py-2.5">
                                                     <span
-                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${drum.status === "AVAILABLE" || drum.status === "EMPTY"
-                                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                            : drum.status === "PACKED" || drum.status === "IN_USE"
-                                                                ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                                                : drum.status === "DISPATCHED"
+                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
+                                                            drum.status === "AVAILABLE" || drum.status === "EMPTY"
+                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                                : drum.status === "PACKED" || drum.status === "IN_USE"
+                                                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                                                  : drum.status === "DISPATCHED"
                                                                     ? "bg-blue-50 text-blue-700 border border-blue-200"
                                                                     : "bg-slate-100 text-slate-600"
-                                                            }`}
+                                                        }`}
                                                     >
                                                         {drum.status}
                                                     </span>
@@ -1043,15 +1078,6 @@ export default function PackingPage() {
                     packingListId={previewPackingListId}
                     open={Boolean(previewPackingListId)}
                     onOpenChange={(val) => !val && setPreviewPackingListId(null)}
-                />
-            )}
-
-            {/* Material Consumption Sheet Dialog   */}
-            {previewChallanId && (
-                <MaterialConsumptionSheetDialog
-                    challanId={previewChallanId}
-                    open={Boolean(previewChallanId)}
-                    onOpenChange={(val) => !val && setPreviewChallanId(null)}
                 />
             )}
         </div>

@@ -18,8 +18,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { toast } from 'sonner';
-import { Package, ShieldCheck, Ruler, Scale } from 'lucide-react';
+import { Package } from 'lucide-react';
 
 export function CreateDrumDialog({
   open,
@@ -45,12 +46,12 @@ export function CreateDrumDialog({
     e.preventDefault();
 
     if (!formData.drumNumber.trim()) {
-      toast.error('Drum serial identification number is required');
+      toast.error('Drum number is required');
       return;
     }
 
     if (formData.ownership === 'CUSTOMER' && !formData.customerId) {
-      toast.error('Customer reference is required for customer-supplied drums');
+      toast.error('Customer is required for customer-owned drums');
       return;
     }
 
@@ -94,21 +95,21 @@ export function CreateDrumDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl md:max-w-2xl bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+        className="w-full sm:max-w-lg md:max-w-xl bg-white p-0 flex flex-col h-full shadow-xl border-l border-slate-200"
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
+        <div className="px-6 py-5 border-b border-slate-100 bg-white">
           <SheetHeader className="p-0">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-slate-900 text-white shadow-xs">
+              <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
                 <Package className="w-5 h-5" />
               </div>
               <div>
-                <SheetTitle className="text-xl font-bold text-slate-900">
-                  Register Cable Drum
+                <SheetTitle className="text-base font-semibold text-slate-900">
+                  New Drum
                 </SheetTitle>
-                <SheetDescription className="text-xs text-slate-500 mt-0.5">
-                  Track returnable cable spools, wooden reels, and corrugated steel drums.
+                <SheetDescription className="text-xs text-slate-500">
+                  Register a cable drum in the yard inventory
                 </SheetDescription>
               </div>
             </div>
@@ -116,189 +117,154 @@ export function CreateDrumDialog({
         </div>
 
         {/* Scrollable Form Body */}
-        <form id="createDrumForm" onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-          {/* Section 1: Drum Identification */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                1. Drum Identification & Type
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Drum Serial Number / Code <span className="text-rose-500">*</span>
-                </Label>
-                <Input
-                  placeholder="e.g. DRM-WD-1400-01"
-                  value={formData.drumNumber}
-                  onChange={(e) => setFormData({ ...formData, drumNumber: e.target.value })}
-                  className="h-10 text-sm font-mono uppercase bg-white"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Drum Material Type <span className="text-rose-500">*</span>
-                </Label>
-                <Select
-                  value={formData.drumType}
-                  onValueChange={(val) => setFormData({ ...formData, drumType: val })}
-                >
-                  <SelectTrigger className="w-full h-10 text-sm bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WOODEN" className="text-sm">Heavy Wooden Drum</SelectItem>
-                    <SelectItem value="STEEL" className="text-sm">Corrugated Steel Drum</SelectItem>
-                    <SelectItem value="PLASTIC" className="text-sm">Plastic Spool (Control / Small Wires)</SelectItem>
-                    <SelectItem value="PLYWOOD" className="text-sm">Export Plywood Drum</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2: Ownership */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <ShieldCheck className="w-4 h-4 text-slate-500" />
-              <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                2. Custody & Ownership
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Drum Ownership <span className="text-rose-500">*</span>
-                </Label>
-                <Select
-                  value={formData.ownership}
-                  onValueChange={(val) => setFormData({ ...formData, ownership: val })}
-                >
-                  <SelectTrigger className="w-full h-10 text-sm bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FACTORY" className="text-sm">Factory Owned (Returnable)</SelectItem>
-                    <SelectItem value="CUSTOMER" className="text-sm">Customer Supplied Drum</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {formData.ownership === 'CUSTOMER' && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                    Customer Owner <span className="text-rose-500">*</span>
-                  </Label>
-                  <Select
-                    value={formData.customerId}
-                    onValueChange={(val) => setFormData({ ...formData, customerId: val })}
-                  >
-                    <SelectTrigger className="w-full h-10 text-sm bg-white">
-                      <SelectValue placeholder="Select client..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60">
-                      {customers.map((c) => (
-                        <SelectItem key={c._id} value={c._id} className="text-sm">
-                          {c.name} ({c.code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Section 3: Dimensions & Weight */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <Ruler className="w-4 h-4 text-slate-500" />
-              <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                3. Physical Dimensions & Tare Weight
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Flange Diameter (mm)
-                </Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 1400"
-                  value={formData.flangeDiameterMm}
-                  onChange={(e) => setFormData({ ...formData, flangeDiameterMm: e.target.value })}
-                  className="h-10 text-sm bg-white"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Barrel Diameter (mm)
-                </Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 700"
-                  value={formData.barrelDiameterMm}
-                  onChange={(e) => setFormData({ ...formData, barrelDiameterMm: e.target.value })}
-                  className="h-10 text-sm bg-white"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Traverse Width (mm)
-                </Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 900"
-                  value={formData.traverseWidthMm}
-                  onChange={(e) => setFormData({ ...formData, traverseWidthMm: e.target.value })}
-                  className="h-10 text-sm bg-white"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Tare Empty Weight (Kg)
-                </Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 120"
-                  value={formData.tareWeightKg}
-                  onChange={(e) => setFormData({ ...formData, tareWeightKg: e.target.value })}
-                  className="h-10 text-sm bg-white"
-                />
-              </div>
+        <form id="createDrumForm" onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-700">
+                Drum Number <span className="text-rose-500">*</span>
+              </Label>
+              <Input
+                placeholder="e.g. DRM-1400-01"
+                value={formData.drumNumber}
+                onChange={(e) => setFormData({ ...formData, drumNumber: e.target.value })}
+                className="h-9 text-xs font-mono uppercase bg-white"
+                required
+              />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Notes & Inspection Status
+              <Label className="text-xs font-medium text-slate-700">
+                Material Type <span className="text-rose-500">*</span>
               </Label>
-              <Input
-                placeholder="e.g. Inspected on delivery, painted ends for export compliance"
-                value={formData.remarks}
-                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                className="h-10 text-sm bg-white"
-              />
+              <Select
+                value={formData.drumType}
+                onValueChange={(val) => setFormData({ ...formData, drumType: val })}
+              >
+                <SelectTrigger className="w-full h-9 text-xs bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="WOODEN" className="text-xs">Wooden Drum</SelectItem>
+                  <SelectItem value="STEEL" className="text-xs">Steel Drum</SelectItem>
+                  <SelectItem value="PLASTIC" className="text-xs">Plastic Spool</SelectItem>
+                  <SelectItem value="PLYWOOD" className="text-xs">Plywood Drum</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-700">
+                Ownership <span className="text-rose-500">*</span>
+              </Label>
+              <Select
+                value={formData.ownership}
+                onValueChange={(val) => setFormData({ ...formData, ownership: val })}
+              >
+                <SelectTrigger className="w-full h-9 text-xs bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FACTORY" className="text-xs">Factory Owned</SelectItem>
+                  <SelectItem value="CUSTOMER" className="text-xs">Customer Supplied</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {formData.ownership === 'CUSTOMER' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-700">
+                  Customer <span className="text-rose-500">*</span>
+                </Label>
+                <SearchableSelect
+                  options={(customers || []).map((c) => ({
+                    value: c._id,
+                    label: c.name,
+                    code: c.code || 'CUST',
+                    subLabel: c.phone || c.email || '',
+                  }))}
+                  value={formData.customerId}
+                  onChange={(val) => setFormData({ ...formData, customerId: val })}
+                  placeholder="Select customer"
+                  searchPlaceholder="Search customer by name or code..."
+                  className="w-full h-9 text-xs bg-white"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-slate-100">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider block mb-3">
+              Dimensions &amp; Weight
+            </span>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-slate-600">Flange (mm)</Label>
+                <Input
+                  type="number"
+                  placeholder="1400"
+                  value={formData.flangeDiameterMm}
+                  onChange={(e) => setFormData({ ...formData, flangeDiameterMm: e.target.value })}
+                  className="h-8 text-xs font-mono bg-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-slate-600">Barrel (mm)</Label>
+                <Input
+                  type="number"
+                  placeholder="700"
+                  value={formData.barrelDiameterMm}
+                  onChange={(e) => setFormData({ ...formData, barrelDiameterMm: e.target.value })}
+                  className="h-8 text-xs font-mono bg-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-slate-600">Traverse (mm)</Label>
+                <Input
+                  type="number"
+                  placeholder="900"
+                  value={formData.traverseWidthMm}
+                  onChange={(e) => setFormData({ ...formData, traverseWidthMm: e.target.value })}
+                  className="h-8 text-xs font-mono bg-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-slate-600">Tare Wt (kg)</Label>
+                <Input
+                  type="number"
+                  placeholder="120"
+                  value={formData.tareWeightKg}
+                  onChange={(e) => setFormData({ ...formData, tareWeightKg: e.target.value })}
+                  className="h-8 text-xs font-mono bg-white"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-slate-700">Remarks</Label>
+            <Input
+              placeholder="Optional notes or description"
+              value={formData.remarks}
+              onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+              className="h-9 text-xs bg-white"
+            />
           </div>
         </form>
 
         {/* Sticky Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50/90 flex items-center justify-end gap-3">
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5">
           <Button
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={loading}
-            className="text-sm h-10 border-slate-200 cursor-pointer bg-white"
+            className="text-xs h-9 cursor-pointer"
           >
             Cancel
           </Button>
@@ -306,9 +272,9 @@ export function CreateDrumDialog({
             type="submit"
             form="createDrumForm"
             disabled={loading}
-            className="text-sm h-10 bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer"
+            className="text-xs h-9 bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer"
           >
-            {loading ? 'Registering...' : 'Register Drum'}
+            {loading ? 'Creating...' : 'Create Drum'}
           </Button>
         </div>
       </SheetContent>

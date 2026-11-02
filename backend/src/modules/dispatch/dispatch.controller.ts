@@ -249,6 +249,105 @@ export class DispatchController {
       next(err);
     }
   }
+
+  // ==========================================
+  // SCRAP CHALLAN (MULTI-WO RETURN)
+  // ==========================================
+
+  async createScrapChallan(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = (req.user as unknown as { _id?: string })?._id?.toString();
+      const challan = await dispatchService.createScrapChallan({
+        ...req.body,
+        issuedBy: userId,
+      });
+      ApiResponseUtil.created(res, challan, 'Scrap return challan created successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getActiveInboundChallansForScrap(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const customerId = req.query.customerId as string;
+      const challans = await dispatchService.getActiveInboundChallansForScrap(customerId);
+      ApiResponseUtil.success(
+        res,
+        challans,
+        'Active non-depleted inbound challans retrieved successfully',
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async listScrapChallans(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const customerId = req.query.customerId as string | undefined;
+      const workOrderId = req.query.workOrderId as string | undefined;
+      const status = req.query.status as string | undefined;
+      const search = req.query.search as string | undefined;
+
+      const result = await dispatchService.getScrapChallans({
+        page,
+        limit,
+        customerId,
+        workOrderId,
+        status,
+        search,
+      });
+
+      ApiResponseUtil.success(res, result.challans, 'Scrap challans retrieved successfully', 200, {
+        pagination: result.pagination,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getScrapChallanById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const challan = await dispatchService.getScrapChallanById(req.params.id);
+      ApiResponseUtil.success(res, challan, 'Scrap challan retrieved successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getScrapChallanConsumptionSheet(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const sheet = await dispatchService.getScrapChallanConsumptionSheet(req.params.id);
+      ApiResponseUtil.success(res, sheet, 'Scrap consumption sheet retrieved successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async updateScrapChallanConsumptionSheet(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const saved = await dispatchService.updateScrapChallanConsumptionSheet(
+        req.params.id,
+        req.body,
+      );
+      ApiResponseUtil.success(res, saved, 'Scrap consumption sheet updated successfully');
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 export const dispatchController = new DispatchController();

@@ -5,7 +5,7 @@ export interface IBomItem extends Document {
   materialId: mongoose.Types.ObjectId;
   processStageId?: mongoose.Types.ObjectId;
   quantityPerUnit: number; // e.g. kg of material per 1 unit of product
-  scrapTolerancePercentage: number;
+  scrapTolerancePercentage?: number;
   isMandatory: boolean;
   stageSequence: number;
   notes?: string;

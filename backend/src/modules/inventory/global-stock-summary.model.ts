@@ -14,7 +14,6 @@ export interface IGlobalStockSummary extends Document {
   issuedToProductionQuantity: number;
   consumedQuantity: number;
   returnsFromProductionQuantity: number;
-  scrapQuantity: number;
   adjustmentsQuantity: number;
   closingQuantity: number;
   unit: string;
@@ -90,12 +89,6 @@ const globalStockSummarySchema = new Schema<IGlobalStockSummary>(
       required: true,
       default: 0,
       min: [0, 'Returns from production quantity cannot be negative'],
-    },
-    scrapQuantity: {
-      type: Number,
-      required: true,
-      default: 0,
-      min: [0, 'Scrap quantity cannot be negative'],
     },
     adjustmentsQuantity: {
       type: Number,

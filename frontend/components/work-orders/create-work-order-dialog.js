@@ -51,6 +51,7 @@ export function CreateWorkOrderDialog({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [freezeStock, setFreezeStock] = useState(true);
   const [customerChallans, setCustomerChallans] = useState([]);
+  const [customerInboundSummary, setCustomerInboundSummary] = useState(null);
   const [loadingChallans, setLoadingChallans] = useState(false);
 
   useEffect(() => {
@@ -115,6 +116,7 @@ export function CreateWorkOrderDialog({
         .finally(() => setLoadingChallans(false));
     } else {
       setCustomerChallans([]);
+      setCustomerInboundSummary(null);
       setFormData((prev) => ({ ...prev, inboundChallanId: '', inboundChallanNumber: '' }));
     }
   }, [formData.customerId]);
@@ -189,20 +191,24 @@ export function CreateWorkOrderDialog({
           if (res?.data?.materials) {
             setPreviewAvailability(res.data.materials);
             setAutoAllocatedChallans(res.data.autoAllocatedChallans || null);
+            setCustomerInboundSummary(res.data.customerInboundSummary || null);
           } else {
             setPreviewAvailability(null);
             setAutoAllocatedChallans(null);
+            setCustomerInboundSummary(null);
           }
         })
         .catch((e) => {
           console.error('Failed to preview material availability', e);
           setPreviewAvailability(null);
           setAutoAllocatedChallans(null);
+          setCustomerInboundSummary(null);
         })
         .finally(() => setLoadingPreview(false));
     } else {
       setPreviewAvailability(null);
       setAutoAllocatedChallans(null);
+      setCustomerInboundSummary(null);
     }
   }, [formData.bomVersionId, formData.orderedLengthMeters, formData.customerId, formData.inboundChallanId]);
 
@@ -210,6 +216,13 @@ export function CreateWorkOrderDialog({
   const customerHasShortage = (previewAvailability || []).some(
     (m) => (m.customerShortage || 0) > 0 || (m.customerAvailableQuantity || 0) < (m.requiredQuantity || 0)
   );
+
+  // Check if selected customer has no inbound material across all their challans
+  const hasNoInboundMaterial =
+    Boolean(formData.customerId) &&
+    !loadingChallans &&
+    (customerChallans.length === 0 ||
+      (customerInboundSummary && !customerInboundSummary.hasInboundMaterial));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -230,6 +243,14 @@ export function CreateWorkOrderDialog({
     const length = parseFloat(formData.orderedLengthMeters);
     if (isNaN(length) || length <= 0) {
       toast.error('Ordered length must be greater than 0 meters');
+      return;
+    }
+
+    if (hasNoInboundMaterial) {
+      toast.error(
+        customerInboundSummary?.reason ||
+          'Cannot create Work Order: Selected customer has no material in total across all their inbound challans.'
+      );
       return;
     }
 
@@ -364,8 +385,19 @@ export function CreateWorkOrderDialog({
                 />
               </div>
             </div>
-            {/* 
-            {/* Automatic Inbound Challan Selection via LIFO Stock Exhaustion */}
+
+            {hasNoInboundMaterial && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-3 text-rose-900 text-xs shadow-xs animate-in fade-in-50">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-rose-950">Customer Requirement Blocked: No Inbound Material</div>
+                  <div className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
+                    {customerInboundSummary?.reason ||
+                      'Selected customer has no material in total across all their inbound challans. Work order cannot be created for this customer requirement until an inbound challan is received and posted.'}
+                  </div>
+                </div>
+              </div>
+            )}
             {/* <div className="space-y-2 p-3.5 bg-gradient-to-r from-indigo-50/90 to-blue-50/70 rounded-xl border border-indigo-200/90 shadow-2xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -703,19 +735,21 @@ export function CreateWorkOrderDialog({
             <Button
               type="submit"
               size="sm"
-              disabled={loading || customerHasShortage}
-              className={`h-9 text-xs font-medium cursor-pointer shadow-xs ${customerHasShortage
+              disabled={loading || customerHasShortage || hasNoInboundMaterial}
+              className={`h-9 text-xs font-medium cursor-pointer shadow-xs ${customerHasShortage || hasNoInboundMaterial
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                   : 'bg-slate-900 hover:bg-slate-800 text-white'
                 }`}
             >
               {loading
                 ? 'Creating...'
-                : customerHasShortage
-                  ? 'Stock Deficit (Creation Blocked)'
-                  : freezeStock
-                    ? 'Create & Freeze Stock'
-                    : 'Create Draft Work Order'}
+                : hasNoInboundMaterial
+                  ? 'No Inbound Material (Blocked)'
+                  : customerHasShortage
+                    ? 'Stock Deficit (Creation Blocked)'
+                    : freezeStock
+                      ? 'Create & Freeze Stock'
+                      : 'Create Draft Work Order'}
             </Button>
           </div>
         </form>

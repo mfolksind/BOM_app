@@ -14,6 +14,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -170,17 +178,72 @@ export function EditWorkOrderDialog({
     }
   };
 
-  const handleConfirm = async () => {
-    if (!confirm('Confirm this Work Order? This permanently freezes the active BOM recipe and reserves/freezes required material stock.')) return;
+  // Action confirmation modal state
+  const [confirmModal, setConfirmModal] = useState({
+    open: false,
+    type: null, // 'CONFIRM' | 'COMPLETE' | 'HOLD' | 'CANCEL'
+    reason: '',
+    loading: false,
+  });
+
+  const openActionModal = (type) => {
+    setConfirmModal({
+      open: true,
+      type,
+      reason: '',
+      loading: false,
+    });
+  };
+
+  const handleActionModalSubmit = async () => {
+    const { type, reason } = confirmModal;
+
+    if ((type === 'HOLD' || type === 'CANCEL') && !reason.trim()) {
+      toast.error(`Please provide a reason to ${type.toLowerCase()} this work order`);
+      return;
+    }
+
+    setConfirmModal((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await api.post(`/work-orders/${workOrderId}/confirm`, { autoReserve: true });
-      if (res?.success) {
-        toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
-        loadData(workOrderId);
-        if (onSuccess) onSuccess();
+      if (type === 'CONFIRM') {
+        const res = await api.post(`/work-orders/${workOrderId}/confirm`, { autoReserve: true });
+        if (res?.success) {
+          toast.success('Work Order confirmed and customer stock reserved/frozen successfully');
+          loadData(workOrderId);
+          if (onSuccess) onSuccess();
+          setConfirmModal({ open: false, type: null, reason: '', loading: false });
+        }
+      } else if (type === 'COMPLETE') {
+        const res = await api.post(`/work-orders/${workOrderId}/complete`, {
+          force: true,
+          remarks: reason.trim() || 'Completed via Work Order details dialog',
+        });
+        if (res?.success || res?.data) {
+          toast.success('Work Order marked as COMPLETED. Client stock unfrozen & removed from inventory.');
+          loadData(workOrderId);
+          if (onSuccess) onSuccess();
+          setConfirmModal({ open: false, type: null, reason: '', loading: false });
+        }
+      } else if (type === 'HOLD') {
+        const res = await api.post(`/work-orders/${workOrderId}/hold`, { reason: reason.trim() });
+        if (res?.success) {
+          toast.success('Work order placed on hold');
+          loadData(workOrderId);
+          if (onSuccess) onSuccess();
+          setConfirmModal({ open: false, type: null, reason: '', loading: false });
+        }
+      } else if (type === 'CANCEL') {
+        const res = await api.post(`/work-orders/${workOrderId}/cancel`, { reason: reason.trim() });
+        if (res?.success) {
+          toast.success('Work order cancelled');
+          onOpenChange(false);
+          if (onSuccess) onSuccess();
+          setConfirmModal({ open: false, type: null, reason: '', loading: false });
+        }
       }
     } catch (err) {
-      toast.error(err.message || 'Failed to confirm work order');
+      toast.error(err.message || 'Operation failed');
+      setConfirmModal((prev) => ({ ...prev, loading: false }));
     }
   };
 
@@ -197,21 +260,6 @@ export function EditWorkOrderDialog({
     }
   };
 
-  const handleHold = async () => {
-    const reason = prompt('Please enter reason for putting on hold:');
-    if (!reason || !reason.trim()) return;
-    try {
-      const res = await api.post(`/work-orders/${workOrderId}/hold`, { reason: reason.trim() });
-      if (res?.success) {
-        toast.success('Work order placed on hold');
-        loadData(workOrderId);
-        if (onSuccess) onSuccess();
-      }
-    } catch (err) {
-      toast.error(err.message || 'Failed to hold work order');
-    }
-  };
-
   const handleResume = async () => {
     try {
       const res = await api.post(`/work-orders/${workOrderId}/resume`, {});
@@ -222,21 +270,6 @@ export function EditWorkOrderDialog({
       }
     } catch (err) {
       toast.error(err.message || 'Failed to resume work order');
-    }
-  };
-
-  const handleCancel = async () => {
-    const reason = prompt('Please enter cancellation reason:');
-    if (!reason || !reason.trim()) return;
-    try {
-      const res = await api.post(`/work-orders/${workOrderId}/cancel`, { reason: reason.trim() });
-      if (res?.success) {
-        toast.success('Work order cancelled');
-        onOpenChange(false);
-        if (onSuccess) onSuccess();
-      }
-    } catch (err) {
-      toast.error(err.message || 'Failed to cancel work order');
     }
   };
 
@@ -269,7 +302,7 @@ export function EditWorkOrderDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-2xl md:max-w-3xl lg:w-[56vw] lg:max-w-[960px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
+        className="w-full sm:max-w-2xl md:max-w-3xl lg:w-[56vw] lg:max-w-240 bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
       >
         {/* Drawer Header */}
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
@@ -292,17 +325,30 @@ export function EditWorkOrderDialog({
                 </div>
               </div>
 
-              {!isEditing && isDraft && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setIsEditing(true)}
-                  className="h-8 gap-1.5 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  Edit Order
-                </Button>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                {!isEditing && workOrder?.status !== 'COMPLETED' && workOrder?.status !== 'CANCELLED' && (
+                  <Button
+                    size="sm"
+                    onClick={() => openActionModal('COMPLETE')}
+                    className="h-8 gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium cursor-pointer shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Mark Complete
+                  </Button>
+                )}
+
+                {!isEditing && isDraft && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsEditing(true)}
+                    className="h-8 gap-1.5 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit Order
+                  </Button>
+                )}
+              </div>
             </div>
           </SheetHeader>
         </div>
@@ -539,7 +585,7 @@ export function EditWorkOrderDialog({
                   </div>
 
                   <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-xs bg-white">
-                    <Table className="min-w-[700px]">
+                    <Table className="min-w-175">
                       <TableHeader className="bg-slate-50/80">
                         <TableRow>
                           <TableHead className="text-xs font-semibold text-slate-700 py-2">Material</TableHead>
@@ -701,7 +747,7 @@ export function EditWorkOrderDialog({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleCancel}
+                      onClick={() => openActionModal('CANCEL')}
                       className="h-9 text-xs border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
                     >
                       <XCircle className="w-3.5 h-3.5 mr-1" />
@@ -709,7 +755,7 @@ export function EditWorkOrderDialog({
                     </Button>
                     <Button
                       size="sm"
-                      onClick={handleConfirm}
+                      onClick={() => openActionModal('CONFIRM')}
                       className="h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
@@ -733,7 +779,7 @@ export function EditWorkOrderDialog({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleHold}
+                      onClick={() => openActionModal('HOLD')}
                       className="h-9 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 cursor-pointer"
                     >
                       <PauseCircle className="w-3.5 h-3.5 mr-1" />
@@ -752,6 +798,17 @@ export function EditWorkOrderDialog({
                     Resume Order
                   </Button>
                 )}
+
+                {workOrder?.status !== 'COMPLETED' && workOrder?.status !== 'CANCELLED' && (
+                  <Button
+                    size="sm"
+                    onClick={() => openActionModal('COMPLETE')}
+                    className="h-9 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-medium cursor-pointer shadow-xs gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Mark Complete
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -764,6 +821,129 @@ export function EditWorkOrderDialog({
         onOpenChange={setScrapOpen}
         onSuccess={() => loadData(workOrderId)}
       />
+
+      {/* Action Confirmation Modal Dialog */}
+      <Dialog
+        open={confirmModal.open}
+        onOpenChange={(val) => {
+          if (!val && !confirmModal.loading) {
+            setConfirmModal({ open: false, type: null, reason: '', loading: false });
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-120">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              {confirmModal.type === 'COMPLETE' && (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  Mark Work Order as Complete
+                </>
+              )}
+              {confirmModal.type === 'CONFIRM' && (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  Confirm Work Order &amp; Freeze BOM
+                </>
+              )}
+              {confirmModal.type === 'HOLD' && (
+                <>
+                  <PauseCircle className="w-5 h-5 text-amber-600" />
+                  Place Work Order on Hold
+                </>
+              )}
+              {confirmModal.type === 'CANCEL' && (
+                <>
+                  <XCircle className="w-5 h-5 text-rose-600" />
+                  Cancel Work Order
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 pt-1">
+              Work Order:{' '}
+              <span className="font-mono font-bold text-slate-800">
+                {workOrder?.workOrderNumber}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-3 text-xs text-slate-600 space-y-3">
+            {confirmModal.type === 'COMPLETE' && (
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-lg text-emerald-950 space-y-1.5">
+                <p className="font-semibold text-emerald-900">
+                  Are you sure you want to complete this order?
+                </p>
+                <p className="text-[11px] text-emerald-800">
+                  This will unfreeze reserved materials, consume and deduct the allocated raw material quantities from the client&apos;s active inventory &amp; material lots, and make the order eligible for Drum Packing.
+                </p>
+              </div>
+            )}
+
+            {confirmModal.type === 'CONFIRM' && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 space-y-1">
+                <p className="font-medium text-slate-900">
+                  Confirm and freeze recipe norms?
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  This permanently locks the active BOM recipe snapshot and automatically reserves/freezes required raw material stock from the client&apos;s available inventory.
+                </p>
+              </div>
+            )}
+
+            {(confirmModal.type === 'HOLD' || confirmModal.type === 'CANCEL') && (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-700 font-medium">
+                  Please provide a reason to {confirmModal.type === 'HOLD' ? 'put this order on hold' : 'cancel this order'}:
+                </p>
+                <Textarea
+                  value={confirmModal.reason}
+                  onChange={(e) => setConfirmModal((prev) => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Enter reason..."
+                  className="text-xs h-20"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={confirmModal.loading}
+              onClick={() =>
+                setConfirmModal({ open: false, type: null, reason: '', loading: false })
+              }
+              className="h-8 text-xs cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={confirmModal.loading}
+              onClick={handleActionModalSubmit}
+              className={`h-8 text-xs font-medium cursor-pointer ${
+                confirmModal.type === 'CANCEL'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : confirmModal.type === 'HOLD'
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                    : 'bg-slate-900 hover:bg-slate-800 text-white'
+              }`}
+            >
+              {confirmModal.loading
+                ? 'Processing...'
+                : confirmModal.type === 'COMPLETE'
+                  ? 'Yes, Mark Complete'
+                  : confirmModal.type === 'CONFIRM'
+                    ? 'Confirm Order'
+                    : confirmModal.type === 'HOLD'
+                      ? 'Place on Hold'
+                      : 'Confirm Cancellation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }
