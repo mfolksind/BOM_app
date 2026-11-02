@@ -1,0 +1,119 @@
+services:
+    mongo_express:
+        image: mongo-express
+        container_name: mongo_express
+        restart: always
+        ports:
+            - "8081:8081"
+        environment:
+            ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+            ME_CONFIG_MONGODB_ADMINPASSWORD: admin123
+            ME_CONFIG_MONGODB_SERVER: mongo
+
+            ME_CONFIG_BASICAUTH_USERNAME: chinchin
+            ME_CONFIG_BASICAUTH_PASSWORD: sachinchin@123
+        networks:
+            - mfolks
+    mongo:
+        image: mongo:7
+        container_name: mongo
+        restart: unless-stopped
+        volumes:
+            - ./mongo_data:/data/db
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: admin
+            MONGO_INITDB_ROOT_PASSWORD: admin123
+        networks:
+            - mfolks
+
+    server:
+        image: ghcr.io/chinxcode/mfolks-server:latest
+        container_name: server
+        restart: unless-stopped
+        env_file:
+            - backend.env
+        volumes:
+            - backend_public:/app/public
+        depends_on:
+            - mongo
+        networks:
+            - mfolks
+
+    geotrix:
+        image: ghcr.io/chinxcode/geotrix:latest
+        container_name: geotrix
+        restart: unless-stopped
+        depends_on:
+            - server
+        networks:
+            - mfolks
+
+    admin:
+        image: ghcr.io/chinxcode/mfolks-admin:latest
+        container_name: admin
+        restart: unless-stopped
+        depends_on:
+            - server
+        networks:
+            - mfolks
+
+    bom_frontend:
+        image: ghcr.io/chinxcode/mfolks_bom_frontend:latest
+        container_name: bom_frontend
+        restart: unless-stopped
+        depends_on:
+            - server
+        networks:
+            - mfolks
+
+    bom_server:
+        image: ghcr.io/chinxcode/mfolks_bom_server:latest
+        container_name: bom_server
+        restart: unless-stopped
+        env_file:
+            - bom.env
+        volumes:
+            - bom_server_public:/app/public
+        depends_on:
+            - mongo
+        networks:
+            - mfolks
+
+    nginx:
+        image: nginx:1.27
+        container_name: nginx
+        restart: unless-stopped
+        ports:
+            - "80:80"
+            - "443:443"
+        volumes:
+            - ./nginx/conf.d:/etc/nginx/conf.d
+            - certbot_www:/var/www/certbot
+            - certbot_certs:/etc/letsencrypt
+        depends_on:
+            - server
+            - geotrix
+            - admin
+            - bom_server
+            - bom_frontend
+        networks:
+            - mfolks
+
+    certbot:
+        image: certbot/certbot:latest
+        container_name: certbot
+        volumes:
+            - certbot_www:/var/www/certbot
+            - certbot_certs:/etc/letsencrypt
+        entrypoint: >
+            sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+
+volumes:
+    certbot_www:
+    certbot_certs:
+    backend_public:
+    bom_server_public:
+
+networks:
+    mfolks:
+        driver: bridge
