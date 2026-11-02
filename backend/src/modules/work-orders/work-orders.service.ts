@@ -5,6 +5,7 @@ import { ProductModel } from '../products/product.model';
 import { BomVersionModel } from '../bom/bom-version.model';
 import { BomItemModel } from '../bom/bom-item.model';
 import { MaterialModel } from '../materials/material.model';
+import { MaterialLotModel } from '../materials/material-lot.model';
 import { InventoryBalanceModel } from '../inventory/inventory-balance.model';
 import { MaterialReservationModel } from '../inventory/material-reservation.model';
 import { InventoryTransactionModel } from '../inventory/inventory-transaction.model';
@@ -15,6 +16,8 @@ import { MaterialReturnModel } from '../production/material-return.model';
 import { ScrapRecordModel } from '../production/scrap-record.model';
 import { ProductionOutputModel } from '../production/production-output.model';
 import { WarehouseModel } from '../warehouses/warehouse.model';
+import { InboundChallanModel } from '../inventory/inbound-challan.model';
+import { InboundChallanLineModel } from '../inventory/inbound-challan-line.model';
 import { inventoryBalanceService } from '../inventory/inventory-balance.service';
 import { InventorySequenceUtil } from '../inventory/inventory-sequence.util';
 import { InventoryAuditUtil } from '../inventory/inventory-audit.util';
@@ -23,6 +26,8 @@ import { BadRequestError, NotFoundError } from '../../common/errors';
 
 export interface CreateWorkOrderDto {
   customerId: string;
+  inboundChallanId?: string;
+  inboundChallanNumber?: string;
   productId: string;
   bomVersionId: string;
   orderedLengthMeters: number;
@@ -75,11 +80,56 @@ export class WorkOrdersService {
       throw new BadRequestError('Specified BOM version does not belong to the selected product');
     }
 
+    // Enforce customer stock restriction: verify customer has sufficient stock before creating work order
+    const preview = await this.previewMaterialAvailability({
+      bomVersionId: dto.bomVersionId,
+      orderedLengthMeters: dto.orderedLengthMeters,
+      customerId: dto.customerId,
+      inboundChallanId: dto.inboundChallanId,
+    });
+
+    const deficient = preview.materials.filter((m: any) => (m.customerShortage || 0) > 0);
+    if (deficient.length > 0) {
+      const details = deficient
+        .map((m: any) => `${m.materialName} (${m.materialCode}): Required ${m.requiredQuantity} ${m.unit}, Available ${m.customerAvailableQuantity} ${m.unit} (Deficit: ${m.customerShortage} ${m.unit})`)
+        .join('; ');
+      throw new BadRequestError(
+        `Cannot create Work Order: Selected customer does not have sufficient raw material in yard/warehouse. Borrowing global/other customer stock is restricted. Details: ${details}`
+      );
+    }
+
+    let resolvedChallanNumber = dto.inboundChallanNumber;
+    let resolvedChallanId = dto.inboundChallanId;
+    let resolvedChallanIds: mongoose.Types.ObjectId[] = [];
+    let resolvedChallanNumbers: string[] = [];
+
+    if (preview.autoAllocatedChallans && preview.autoAllocatedChallans.inboundChallanIds?.length > 0) {
+      resolvedChallanIds = preview.autoAllocatedChallans.inboundChallanIds;
+      resolvedChallanNumbers = preview.autoAllocatedChallans.inboundChallanNumbers;
+      if (!resolvedChallanId) {
+        resolvedChallanId = preview.autoAllocatedChallans.primaryChallanId?.toString();
+      }
+      if (!resolvedChallanNumber) {
+        resolvedChallanNumber = preview.autoAllocatedChallans.primaryChallanNumber;
+      }
+    } else if (resolvedChallanId && !resolvedChallanNumber) {
+      const challanDoc = await InboundChallanModel.findById(resolvedChallanId);
+      if (challanDoc) {
+        resolvedChallanNumber = challanDoc.customerChallanNumber || challanDoc.challanNumber;
+        resolvedChallanIds = [challanDoc._id];
+        resolvedChallanNumbers = [resolvedChallanNumber];
+      }
+    }
+
     const workOrderNumber = await InventorySequenceUtil.getNextSequence('WORK_ORDER', 'WO');
 
     const workOrder = await WorkOrderModel.create({
       workOrderNumber,
       customerId: customer._id,
+      inboundChallanId: resolvedChallanId ? new mongoose.Types.ObjectId(resolvedChallanId) : undefined,
+      inboundChallanNumber: resolvedChallanNumber,
+      inboundChallanIds: resolvedChallanIds.length > 0 ? resolvedChallanIds : undefined,
+      inboundChallanNumbers: resolvedChallanNumbers.length > 0 ? resolvedChallanNumbers : undefined,
       productId: product._id,
       bomVersionId: bomVersion._id,
       orderedLengthMeters: dto.orderedLengthMeters,
@@ -153,6 +203,8 @@ export class WorkOrdersService {
         .populate('customerId', 'code name legalName gstin')
         .populate('productId', 'code name cableCategory voltageGrade')
         .populate('bomVersionId', 'bomNumber versionNumber status')
+        .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber')
+        .populate('inboundChallanIds', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(filter.limit)
@@ -180,7 +232,8 @@ export class WorkOrdersService {
       .populate('productId', 'code name cableCategory voltageGrade')
       .populate('bomVersionId', 'bomNumber versionNumber status batchSize outputUnit')
       .populate('createdBy', 'firstName lastName email')
-      .populate('confirmedBy', 'firstName lastName email');
+      .populate('confirmedBy', 'firstName lastName email')
+      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate vehicleNumber');
 
     if (!workOrder) {
       throw new NotFoundError(`Work order with ID '${id}' not found`);
@@ -663,12 +716,148 @@ export class WorkOrdersService {
   }
 
   /**
+   * Automatically allocate Inbound Challans for customer materials using LIFO (or sequential) stock exhaustion.
+   * If one challan runs out, it picks the next challan. If quantity spans multiple challans, both are selected.
+   */
+  async findAutoAllocatedChallans(
+    customerId: string,
+    requirements: Array<{ materialId: any; plannedQuantity: number }>,
+    preferLifo: boolean = true,
+  ): Promise<{
+    inboundChallanIds: mongoose.Types.ObjectId[];
+    inboundChallanNumbers: string[];
+    primaryChallanId?: mongoose.Types.ObjectId;
+    primaryChallanNumber?: string;
+    details: Array<{
+      challanId: string;
+      challanNumber: string;
+      customerChallanDate?: Date;
+      allocatedMaterials: Array<{ materialId: string; quantity: number }>;
+    }>;
+  }> {
+    if (!customerId || !requirements || requirements.length === 0) {
+      return { inboundChallanIds: [], inboundChallanNumbers: [], details: [] };
+    }
+
+    const materialIds = requirements.map((r) => new mongoose.Types.ObjectId(r.materialId));
+
+    // Find all active customer lots with remaining balance
+    const customerLots = await MaterialLotModel.find({
+      customerId: new mongoose.Types.ObjectId(customerId),
+      ownerType: 'CUSTOMER',
+      materialId: { $in: materialIds },
+      currentBalance: { $gt: 0 },
+    })
+      .populate('inboundChallanId', 'challanNumber customerChallanNumber customerChallanDate createdAt')
+      .lean();
+
+    // Query inventory balances for this customer with available quantity
+    const customerBalances = await InventoryBalanceModel.find({
+      customerId: new mongoose.Types.ObjectId(customerId),
+      ownerType: 'CUSTOMER',
+      materialId: { $in: materialIds },
+      quantityAvailable: { $gt: 0 },
+    }).lean();
+
+    const balanceByLot = new Map<string, number>();
+    for (const b of customerBalances) {
+      if (b.lotId) {
+        balanceByLot.set(b.lotId.toString(), b.quantityAvailable);
+      }
+    }
+
+    // Sort lots by receivedDate/createdAt (LIFO: newest first, FIFO: oldest first)
+    customerLots.sort((a, b) => {
+      const dateA = new Date(a.receivedDate || a.createdAt).getTime();
+      const dateB = new Date(b.receivedDate || b.createdAt).getTime();
+      return preferLifo ? dateB - dateA : dateA - dateB;
+    });
+
+    const allocatedChallanMap = new Map<
+      string,
+      {
+        challanId: mongoose.Types.ObjectId;
+        challanNumber: string;
+        customerChallanDate?: Date;
+        sortTime: number;
+        allocatedMaterials: Array<{ materialId: string; quantity: number }>;
+      }
+    >();
+
+    // For each requirement, exhaust available lot stock across challans
+    for (const req of requirements) {
+      let remainingNeeded = req.plannedQuantity;
+      const matLots = customerLots.filter(
+        (lot) => lot.materialId?.toString() === req.materialId?.toString(),
+      );
+
+      for (const lot of matLots) {
+        if (remainingNeeded <= 0) break;
+        const availableInLot = balanceByLot.has(lot._id.toString())
+          ? balanceByLot.get(lot._id.toString())!
+          : lot.currentBalance;
+
+        if (!availableInLot || availableInLot <= 0) continue;
+
+        const take = Math.min(availableInLot, remainingNeeded);
+        remainingNeeded -= take;
+        balanceByLot.set(lot._id.toString(), availableInLot - take);
+
+        const challanDoc = lot.inboundChallanId as any;
+        if (challanDoc && challanDoc._id) {
+          const chKey = challanDoc._id.toString();
+          const chNum = challanDoc.customerChallanNumber || challanDoc.challanNumber || 'UNKNOWN';
+          const chDate = challanDoc.customerChallanDate || challanDoc.createdAt;
+
+          if (!allocatedChallanMap.has(chKey)) {
+            allocatedChallanMap.set(chKey, {
+              challanId: challanDoc._id,
+              challanNumber: chNum,
+              customerChallanDate: chDate ? new Date(chDate) : undefined,
+              sortTime: chDate ? new Date(chDate).getTime() : 0,
+              allocatedMaterials: [],
+            });
+          }
+
+          const existingEntry = allocatedChallanMap.get(chKey)!;
+          existingEntry.allocatedMaterials.push({
+            materialId: req.materialId.toString(),
+            quantity: Number(take.toFixed(4)),
+          });
+        }
+      }
+    }
+
+    const challans = Array.from(allocatedChallanMap.values());
+    challans.sort((a, b) => (preferLifo ? b.sortTime - a.sortTime : a.sortTime - b.sortTime));
+
+    const inboundChallanIds = challans.map((c) => c.challanId);
+    const inboundChallanNumbers = challans.map((c) => c.challanNumber);
+    const primaryChallanId = inboundChallanIds[0];
+    const primaryChallanNumber = inboundChallanNumbers.join(', ');
+
+    return {
+      inboundChallanIds,
+      inboundChallanNumbers,
+      primaryChallanId,
+      primaryChallanNumber,
+      details: challans.map((c) => ({
+        challanId: c.challanId.toString(),
+        challanNumber: c.challanNumber,
+        customerChallanDate: c.customerChallanDate,
+        allocatedMaterials: c.allocatedMaterials,
+      })),
+    };
+  }
+
+  /**
    * Preview material availability and warehouse global stock BEFORE creating work order
    */
   async previewMaterialAvailability(dto: {
     bomVersionId: string;
     orderedLengthMeters: number;
     customerId?: string;
+    inboundChallanId?: string;
   }) {
     const bomVersion = await BomVersionModel.findById(dto.bomVersionId);
     if (!bomVersion) throw new NotFoundError('BOM Version not found');
@@ -743,12 +932,22 @@ export class WorkOrdersService {
       }),
     );
 
+    let autoAllocatedChallans: any = null;
+    if (dto.customerId) {
+      const requirements = availability.map((a) => ({
+        materialId: a.materialId,
+        plannedQuantity: a.requiredQuantity,
+      }));
+      autoAllocatedChallans = await this.findAutoAllocatedChallans(dto.customerId, requirements, true);
+    }
+
     return {
       bomVersionId: bomVersion._id,
       bomNumber: bomVersion.bomNumber,
       orderedLengthMeters: dto.orderedLengthMeters,
       isFullySufficient: availability.every((a) => a.isSufficient),
       materials: availability,
+      autoAllocatedChallans,
     };
   }
 
@@ -867,87 +1066,11 @@ export class WorkOrdersService {
           remainingToReserve -= toTake;
         }
 
-        // 2. If customer stock was insufficient, fulfill remaining from other available warehouse balances (e.g. FACTORY stock or other available warehouse balances)
+        // Strictly restricted to customer stock: borrowing from global/factory or other customers is prohibited
         if (remainingToReserve > 0) {
-          const otherEligibleBalances = await InventoryBalanceModel.find({
-            materialId: req.materialId,
-            _id: { $nin: customerBalances.map((b) => b._id) },
-            quantityAvailable: { $gt: 0 },
-          }).session(session);
-
-          for (const balance of otherEligibleBalances) {
-            if (remainingToReserve <= 0) break;
-
-            const toTake = Math.min(balance.quantityAvailable, remainingToReserve);
-
-            await inventoryBalanceService.reserveStock({
-              materialId: balance.materialId,
-              warehouseId: balance.warehouseId,
-              ownerType: balance.ownerType,
-              customerId: balance.customerId || null,
-              lotId: balance.lotId || null,
-              quantity: toTake,
-              unit: req.unit,
-              session,
-            });
-
-            const reservationNumber = await InventorySequenceUtil.getNextSequence(
-              'MATERIAL_RESERVATION',
-              'RES',
-              session,
-            );
-            const reservation = await MaterialReservationModel.create(
-              [
-                {
-                  reservationNumber,
-                  workOrderId: workOrder._id,
-                  materialId: req.materialId,
-                  warehouseId: balance.warehouseId,
-                  lotId: balance.lotId || null,
-                  ownerType: balance.ownerType,
-                  customerId: balance.customerId || null,
-                  reservedQuantity: toTake,
-                  unit: req.unit,
-                  status: 'ACTIVE',
-                  reservedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-                  remarks: `Reserved from ${balance.ownerType} stock for Work Order ${workOrder.workOrderNumber}`,
-                },
-              ],
-              { session },
-            );
-
-            const txnNumber = await InventorySequenceUtil.getNextSequence(
-              'INVENTORY_TRANSACTION',
-              'TXN',
-              session,
-            );
-            await InventoryTransactionModel.create(
-              [
-                {
-                  transactionNumber: txnNumber,
-                  movementType: 'ADJUSTMENT',
-                  transactionType: 'RESERVATION',
-                  materialId: req.materialId,
-                  warehouseId: balance.warehouseId,
-                  lotId: balance.lotId || null,
-                  ownerType: balance.ownerType,
-                  customerId: balance.customerId || null,
-                  quantity: toTake,
-                  unit: req.unit,
-                  status: 'POSTED',
-                  sourceDocumentType: 'MATERIAL_RESERVATION',
-                  sourceDocumentId: reservation[0]._id,
-                  postedAt: new Date(),
-                  postedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-                  remarks: `Stock reserved from ${balance.ownerType} stock for Work Order ${workOrder.workOrderNumber}`,
-                },
-              ],
-              { session },
-            );
-
-            reservedRecords.push(reservation[0]);
-            remainingToReserve -= toTake;
-          }
+          throw new BadRequestError(
+            `Insufficient customer-owned stock for '${req.materialCode || req.materialName}'. Required: ${needed} ${req.unit}, unfulfilled: ${remainingToReserve} ${req.unit}. Borrowing from global/other customer stock is restricted.`
+          );
         }
 
         if (remainingToReserve > 0) {

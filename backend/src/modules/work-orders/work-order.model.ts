@@ -38,6 +38,8 @@ export interface IWorkOrder extends Document {
   customerId: mongoose.Types.ObjectId;
   inboundChallanId?: mongoose.Types.ObjectId;
   inboundChallanNumber?: string;
+  inboundChallanIds?: mongoose.Types.ObjectId[];
+  inboundChallanNumbers?: string[];
   customerPoNumber?: string;
   customerPoDate?: Date;
   productId: mongoose.Types.ObjectId;
@@ -121,6 +123,18 @@ const workOrderSchema = new Schema<IWorkOrder>(
       type: String,
       trim: true,
     },
+    inboundChallanIds: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'InboundChallan',
+      },
+    ],
+    inboundChallanNumbers: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
     customerPoNumber: {
       type: String,
       trim: true,

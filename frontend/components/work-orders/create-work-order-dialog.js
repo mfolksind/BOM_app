@@ -31,7 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { FileSpreadsheet, Calendar, DollarSign, Layers } from 'lucide-react';
+import { FileSpreadsheet, Calendar, DollarSign, Layers, Truck, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export function CreateWorkOrderDialog({
@@ -47,8 +47,11 @@ export function CreateWorkOrderDialog({
   const [boms, setBoms] = useState([]);
   const [loadingBoms, setLoadingBoms] = useState(false);
   const [previewAvailability, setPreviewAvailability] = useState(null);
+  const [autoAllocatedChallans, setAutoAllocatedChallans] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [freezeStock, setFreezeStock] = useState(true);
+  const [customerChallans, setCustomerChallans] = useState([]);
+  const [loadingChallans, setLoadingChallans] = useState(false);
 
   useEffect(() => {
     if (customers?.length > 0) setLocalCustomers(customers);
@@ -81,6 +84,8 @@ export function CreateWorkOrderDialog({
 
   const [formData, setFormData] = useState({
     customerId: '',
+    inboundChallanId: '',
+    inboundChallanNumber: '',
     productId: '',
     bomVersionId: '',
     orderedLengthMeters: '',
@@ -94,6 +99,26 @@ export function CreateWorkOrderDialog({
     customerSpecifications: '',
   });
 
+  // Fetch posted inbound challans when customer changes
+  useEffect(() => {
+    if (formData.customerId) {
+      setLoadingChallans(true);
+      api.get(`/inbound-challans?customerId=${formData.customerId}&status=POSTED&limit=50`)
+        .then((res) => {
+          const items = Array.isArray(res?.data) ? res.data : res?.data?.items || [];
+          setCustomerChallans(items);
+        })
+        .catch((err) => {
+          console.error('Failed to load customer inbound challans', err);
+          setCustomerChallans([]);
+        })
+        .finally(() => setLoadingChallans(false));
+    } else {
+      setCustomerChallans([]);
+      setFormData((prev) => ({ ...prev, inboundChallanId: '', inboundChallanNumber: '' }));
+    }
+  }, [formData.customerId]);
+
   const handleProductChange = async (productId) => {
     setFormData((prev) => ({ ...prev, productId, bomVersionId: '' }));
     if (!productId) {
@@ -102,7 +127,6 @@ export function CreateWorkOrderDialog({
     }
     setLoadingBoms(true);
     try {
-      // First try standard list endpoint with productId filter
       let bomList = [];
       const res = await api.get(`/boms?productId=${productId}&limit=50`);
       if (Array.isArray(res?.data)) {
@@ -110,7 +134,6 @@ export function CreateWorkOrderDialog({
       } else if (Array.isArray(res?.data?.items)) {
         bomList = res.data.items;
       } else {
-        // Fallback to product-specific endpoint
         const fallbackRes = await api.get(`/boms/product/${productId}`);
         if (Array.isArray(fallbackRes?.data)) {
           bomList = fallbackRes.data;
@@ -121,7 +144,6 @@ export function CreateWorkOrderDialog({
 
       setBoms(bomList);
 
-      // Prefer ACTIVE BOM, otherwise pick newest version
       const activeBom = bomList.find((b) => b.status === 'ACTIVE');
       if (activeBom) {
         setFormData((prev) => ({ ...prev, productId, bomVersionId: activeBom._id }));
@@ -130,14 +152,13 @@ export function CreateWorkOrderDialog({
       }
     } catch (err) {
       console.error('Failed to fetch BOMs for product', err);
-      // Try fallback route
       try {
         const fallbackRes = await api.get(`/boms/product/${productId}`);
         const bomList = Array.isArray(fallbackRes?.data)
           ? fallbackRes.data
           : Array.isArray(fallbackRes?.data?.items)
-          ? fallbackRes.data.items
-          : [];
+            ? fallbackRes.data.items
+            : [];
         setBoms(bomList);
         const activeBom = bomList.find((b) => b.status === 'ACTIVE');
         if (activeBom) {
@@ -162,23 +183,33 @@ export function CreateWorkOrderDialog({
         bomVersionId: formData.bomVersionId,
         orderedLengthMeters: length,
         customerId: formData.customerId || undefined,
+        inboundChallanId: formData.inboundChallanId || undefined,
       })
         .then((res) => {
           if (res?.data?.materials) {
             setPreviewAvailability(res.data.materials);
+            setAutoAllocatedChallans(res.data.autoAllocatedChallans || null);
           } else {
             setPreviewAvailability(null);
+            setAutoAllocatedChallans(null);
           }
         })
         .catch((e) => {
           console.error('Failed to preview material availability', e);
           setPreviewAvailability(null);
+          setAutoAllocatedChallans(null);
         })
         .finally(() => setLoadingPreview(false));
     } else {
       setPreviewAvailability(null);
+      setAutoAllocatedChallans(null);
     }
-  }, [formData.bomVersionId, formData.orderedLengthMeters, formData.customerId]);
+  }, [formData.bomVersionId, formData.orderedLengthMeters, formData.customerId, formData.inboundChallanId]);
+
+  // Check if any material is deficient for this customer
+  const customerHasShortage = (previewAvailability || []).some(
+    (m) => (m.customerShortage || 0) > 0 || (m.customerAvailableQuantity || 0) < (m.requiredQuantity || 0)
+  );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -202,10 +233,17 @@ export function CreateWorkOrderDialog({
       return;
     }
 
+    if (customerHasShortage) {
+      toast.error('Cannot create Work Order: Customer has insufficient raw material stock. Borrowing global/other customer stock is prohibited.');
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
         customerId: formData.customerId,
+        inboundChallanId: formData.inboundChallanId || undefined,
+        inboundChallanNumber: formData.inboundChallanNumber || undefined,
         productId: formData.productId,
         bomVersionId: formData.bomVersionId,
         orderedLengthMeters: length,
@@ -231,6 +269,8 @@ export function CreateWorkOrderDialog({
         onOpenChange(false);
         setFormData({
           customerId: '',
+          inboundChallanId: '',
+          inboundChallanNumber: '',
           productId: '',
           bomVersionId: '',
           orderedLengthMeters: '',
@@ -288,7 +328,7 @@ export function CreateWorkOrderDialog({
               <div>
                 <SheetTitle className="text-xl font-bold text-slate-900">Create Production Work Order</SheetTitle>
                 <SheetDescription className="text-xs text-slate-500 mt-0.5">
-                  Lock customer job order requirements and freeze active BOM manufacturing norms.
+                  Bind customer inbound challan materials, verify raw material sufficiency, and lock active BOM recipe.
                 </SheetDescription>
               </div>
             </div>
@@ -305,7 +345,7 @@ export function CreateWorkOrderDialog({
                 <SearchableSelect
                   options={customerOptions}
                   value={formData.customerId}
-                  onChange={(val) => setFormData({ ...formData, customerId: val })}
+                  onChange={(val) => setFormData({ ...formData, customerId: val, inboundChallanId: '', inboundChallanNumber: '' })}
                   placeholder="Search and choose customer..."
                   searchPlaceholder="Search customer by name or code..."
                 />
@@ -324,6 +364,71 @@ export function CreateWorkOrderDialog({
                 />
               </div>
             </div>
+            {/* 
+            {/* Automatic Inbound Challan Selection via LIFO Stock Exhaustion */}
+            {/* <div className="space-y-2 p-3.5 bg-gradient-to-r from-indigo-50/90 to-blue-50/70 rounded-xl border border-indigo-200/90 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded-md bg-indigo-600 text-white">
+                    <Truck className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-indigo-950 uppercase tracking-wider block">
+                      Auto Inbound Challan Allocation (LIFO)
+                    </span>
+                    <span className="text-[11px] text-indigo-700">
+                      System automatically selects customer challans & exhausts stock chronologically
+                    </span>
+                  </div>
+                </div>
+                <Badge variant="outline" className="bg-indigo-100 text-indigo-800 border-indigo-300 font-mono text-[10px] uppercase font-bold">
+                  Auto-Pick Enabled
+                </Badge>
+              </div>
+
+              {formData.customerId ? (
+                <div className="mt-2 pt-2 border-t border-indigo-100">
+                  {autoAllocatedChallans && autoAllocatedChallans.inboundChallanNumbers?.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                        <span>Allocated Challan(s):</span>
+                        <span className="text-[11px] text-indigo-600 font-normal">
+                          ({autoAllocatedChallans.inboundChallanNumbers.length} challan{autoAllocatedChallans.inboundChallanNumbers.length > 1 ? 's' : ''} covering order requirement)
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {autoAllocatedChallans.inboundChallanNumbers.map((cNum, idx) => (
+                          <div
+                            key={idx}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-indigo-200 font-mono text-xs font-bold text-indigo-950 shadow-2xs"
+                          >
+                            <Truck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            <span>{cNum}</span>
+                            <span className="text-[10px] text-slate-400 font-sans font-normal ml-0.5">#{idx + 1}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-indigo-800/80 leading-relaxed mt-1">
+                        If quantity in one challan is exhausted, the system automatically pulls from subsequent challans.
+                      </p>
+                    </div>
+                  ) : loadingPreview ? (
+                    <div className="text-xs text-indigo-600 italic py-1 flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                      Analyzing customer stock lots & matching challans...
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 py-1">
+                      Enter ordered length to calculate auto-allocated customer challans.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 italic py-1">
+                  Select customer and length to auto-allocate inbound challans.
+                </div>
+              )} */}
+            {/* </div> */}
 
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -381,46 +486,59 @@ export function CreateWorkOrderDialog({
 
             {loadingPreview && (
               <div className="text-xs text-slate-500 py-1 flex items-center gap-1.5 animate-pulse">
-                <span>Checking warehouse stock availability...</span>
+                <span>Checking customer stock sufficiency in yard...</span>
               </div>
             )}
+
             {/* Live Material Availability Preview Table */}
             {previewAvailability && previewAvailability.length > 0 && (
               <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-800">
-                      Live Material Stock & Freezing Breakdown
+                      Customer Material Stock Sufficiency Check
                     </span>
-                    <Badge variant="outline" className="text-[10px] bg-white border-slate-300 text-slate-700">
-                      Party & Global Stock
+                    <Badge variant="outline" className={`text-[10px] font-semibold ${customerHasShortage ? 'bg-rose-50 text-rose-700 border-rose-300' : 'bg-emerald-50 text-emerald-700 border-emerald-300'}`}>
+                      {customerHasShortage ? 'Insufficient Customer Stock' : 'Customer Stock Verified'}
                     </Badge>
                   </div>
                   <span className="text-[11px] text-slate-500">
-                    Live On-Hand vs Frozen (Reserved) vs Free Available
+                    Restricted strictly to selected customer's stock
                   </span>
                 </div>
+
+                {customerHasShortage && (
+                  <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2 text-rose-900 text-xs">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-bold">Customer does not have enough material in yard:</div>
+                      <div className="text-[11px] text-rose-800 mt-0.5">
+                        Work order creation is restricted because borrowing global or other customer stock is not permitted. Please receive raw materials via Inbound Challan first.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border border-slate-200 rounded-lg overflow-x-auto bg-white shadow-xs">
                   <Table className="min-w-[620px]">
                     <TableHeader className="bg-slate-50/80">
                       <TableRow>
                         <TableHead className="text-xs font-semibold text-slate-700 py-2">Material</TableHead>
                         <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Required Norm</TableHead>
-                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Customer Stock</TableHead>
-                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Global Stock</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Customer Stock (Avail)</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700 py-2">Deficit / Surplus</TableHead>
                         <TableHead className="text-center text-xs font-semibold text-slate-700 py-2">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewAvailability.map((m, idx) => {
-                        const isShort = m.shortage > 0;
                         const hasCustomer = Boolean(formData.customerId);
                         const custAvail = m.customerAvailableQuantity || 0;
                         const custOnHand = m.customerOnHandQuantity || 0;
                         const custFrozen = m.customerReservedQuantity || 0;
-                        const globAvail = m.globalAvailableQuantity ?? m.availableStock ?? 0;
-                        const globOnHand = m.globalOnHandQuantity || 0;
-                        const globFrozen = m.globalReservedQuantity || 0;
+                        const reqQty = m.requiredQuantity || 0;
+                        const isDeficient = custAvail < reqQty;
+                        const diff = custAvail - reqQty;
 
                         return (
                           <TableRow key={idx} className="hover:bg-slate-50/50">
@@ -429,13 +547,13 @@ export function CreateWorkOrderDialog({
                               <div className="text-[10px] text-slate-400 font-mono">{m.materialCode}</div>
                             </TableCell>
                             <TableCell className="text-right text-xs text-slate-800 font-semibold py-2">
-                              {m.requiredQuantity?.toFixed(2)} {m.unit}
+                              {reqQty.toFixed(2)} {m.unit}
                             </TableCell>
                             <TableCell className="text-right py-2">
                               {hasCustomer ? (
                                 <div>
-                                  <div className="font-bold text-xs text-slate-900 font-mono">
-                                    {custAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
+                                  <div className={`font-bold text-xs font-mono ${isDeficient ? 'text-rose-700' : 'text-slate-900'}`}>
+                                    {custAvail.toFixed(2)} {m.unit}
                                   </div>
                                   <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
                                     <span>On-Hand: <strong className="text-slate-800">{custOnHand.toFixed(1)}</strong></span>
@@ -447,39 +565,27 @@ export function CreateWorkOrderDialog({
                                 <span className="text-xs text-slate-400 italic">No customer</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-right py-2">
-                              <div>
-                                <div className="font-bold text-xs text-slate-900 font-mono">
-                                  {globAvail.toFixed(2)} {m.unit} <span className="text-[10px] font-normal text-slate-400">avail</span>
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-0.5 space-x-1.5 font-mono">
-                                  <span>On-Hand: <strong className="text-slate-800">{globOnHand.toFixed(1)}</strong></span>
-                                  <span>|</span>
-                                  <span>Frozen: <strong className="text-slate-800">{globFrozen.toFixed(1)}</strong></span>
-                                </div>
-                              </div>
+                            <TableCell className="text-right py-2 font-mono text-xs font-bold">
+                              {diff >= 0 ? (
+                                <span className="text-emerald-700">+{diff.toFixed(2)} {m.unit}</span>
+                              ) : (
+                                <span className="text-rose-700">{diff.toFixed(2)} {m.unit}</span>
+                              )}
                             </TableCell>
                             <TableCell className="text-center py-2">
-                              {custAvail >= m.requiredQuantity ? (
+                              {!isDeficient ? (
                                 <Badge
                                   variant="outline"
                                   className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px] whitespace-nowrap"
                                 >
-                                  Party Stock OK
-                                </Badge>
-                              ) : globAvail >= m.requiredQuantity ? (
-                                <Badge
-                                  variant="outline"
-                                  className="border-blue-200 text-blue-700 bg-blue-50 text-[10px] whitespace-nowrap"
-                                >
-                                  Global Stock OK
+                                  Customer Stock OK
                                 </Badge>
                               ) : (
                                 <Badge
                                   variant="outline"
-                                  className="border-rose-200 text-rose-700 bg-rose-50 text-[10px] whitespace-nowrap"
+                                  className="border-rose-200 text-rose-700 bg-rose-50 text-[10px] whitespace-nowrap font-bold"
                                 >
-                                  Short (-{m.shortage?.toFixed(1)})
+                                  Deficient (-{Math.abs(diff).toFixed(1)})
                                 </Badge>
                               )}
                             </TableCell>
@@ -577,7 +683,7 @@ export function CreateWorkOrderDialog({
               <label htmlFor="freezeStock" className="text-xs text-amber-950 font-medium cursor-pointer select-none">
                 <span className="font-semibold">Freeze & Reserve Customer Stock Immediately</span>
                 <span className="block text-[11px] text-amber-800/90 font-normal mt-0.5 leading-relaxed">
-                  Locks the customer's raw materials so no other order can use them, and deducts them from globally available stock upon creation.
+                  Locks the customer's raw materials so no other order can use them, and reserves them specifically for this Work Order.
                 </span>
               </label>
             </div>
@@ -597,10 +703,19 @@ export function CreateWorkOrderDialog({
             <Button
               type="submit"
               size="sm"
-              disabled={loading}
-              className="h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer shadow-xs"
+              disabled={loading || customerHasShortage}
+              className={`h-9 text-xs font-medium cursor-pointer shadow-xs ${customerHasShortage
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white'
+                }`}
             >
-              {loading ? 'Creating...' : freezeStock ? 'Create & Freeze Stock' : 'Create Draft Work Order'}
+              {loading
+                ? 'Creating...'
+                : customerHasShortage
+                  ? 'Stock Deficit (Creation Blocked)'
+                  : freezeStock
+                    ? 'Create & Freeze Stock'
+                    : 'Create Draft Work Order'}
             </Button>
           </div>
         </form>

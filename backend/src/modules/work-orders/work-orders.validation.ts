@@ -6,6 +6,8 @@ const objectIdSchema = z.string().regex(objectIdRegex, 'Invalid ObjectId');
 export const createWorkOrderSchema = {
   body: z.object({
     customerId: objectIdSchema,
+    inboundChallanId: objectIdSchema.optional(),
+    inboundChallanNumber: z.string().trim().optional(),
     productId: objectIdSchema,
     bomVersionId: objectIdSchema,
     orderedLengthMeters: z.number().positive('Ordered length must be greater than 0'),
@@ -29,6 +31,8 @@ export const updateWorkOrderSchema = {
     id: objectIdSchema,
   }),
   body: z.object({
+    inboundChallanId: objectIdSchema.optional(),
+    inboundChallanNumber: z.string().trim().optional(),
     orderedLengthMeters: z.number().positive().optional(),
     customerPoNumber: z.string().trim().optional(),
     customerPoDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),

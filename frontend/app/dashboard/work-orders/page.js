@@ -59,6 +59,7 @@ import {
   Pencil,
   Lock,
   Scale,
+  Truck,
 } from 'lucide-react';
 
 export default function WorkOrdersPage() {
@@ -340,6 +341,9 @@ export default function WorkOrdersPage() {
                     Customer & PO
                   </TableHead>
                   <TableHead className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Inbound Challan
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                     Target Cable Product
                   </TableHead>
                   <TableHead className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
@@ -360,7 +364,7 @@ export default function WorkOrdersPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-44 text-center text-slate-500">
+                    <TableCell colSpan={8} className="h-44 text-center text-slate-500">
                       <div className="flex items-center justify-center gap-2">
                         <RefreshCw className="w-4 h-4 animate-spin text-slate-900" />
                         <span className="text-sm font-medium">Loading work orders...</span>
@@ -369,7 +373,7 @@ export default function WorkOrdersPage() {
                   </TableRow>
                 ) : workOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-44 text-center">
+                    <TableCell colSpan={8} className="h-44 text-center">
                       <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
                         <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
                           <FileSpreadsheet className="w-5 h-5" />
@@ -403,11 +407,10 @@ export default function WorkOrdersPage() {
                             {wo.priority && wo.priority !== 'NORMAL' && (
                               <Badge
                                 variant="outline"
-                                className={`text-[10px] uppercase px-1.5 py-0 ${
-                                  wo.priority === 'URGENT'
+                                className={`text-[10px] uppercase px-1.5 py-0 ${wo.priority === 'URGENT'
                                     ? 'border-rose-300 bg-rose-50 text-rose-700'
                                     : 'border-amber-300 bg-amber-50 text-amber-700'
-                                }`}
+                                  }`}
                               >
                                 {wo.priority}
                               </Badge>
@@ -428,6 +431,55 @@ export default function WorkOrdersPage() {
                             </div>
                           )}
                         </TableCell>
+                        {/* 
+                        <TableCell className="py-3.5">
+                          {wo.inboundChallanNumbers && wo.inboundChallanNumbers.length > 0 ? (
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap gap-1">
+                                {wo.inboundChallanNumbers.map((cNum, cIdx) => (
+                                  <span
+                                    key={cIdx}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-950 font-mono font-bold text-[11px]"
+                                  >
+                                    <Truck className="w-3 h-3 text-indigo-600 shrink-0" />
+                                    {cNum}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-sans">
+                                Auto-allocated ({wo.inboundChallanNumbers.length} challan{wo.inboundChallanNumbers.length > 1 ? 's' : ''})
+                              </div>
+                            </div>
+                          ) : wo.inboundChallanId ? (
+                            <div>
+                              <div className="flex items-center gap-1.5 font-bold text-slate-900 font-mono text-xs">
+                                <Truck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                {wo.inboundChallanId.customerChallanNumber || wo.inboundChallanId.challanNumber || wo.inboundChallanNumber}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                                {wo.inboundChallanId.customerChallanDate
+                                  ? `DT: ${new Date(wo.inboundChallanId.customerChallanDate).toLocaleDateString()}`
+                                  : 'Linked Challan Batch'}
+                              </div>
+                            </div>
+                          ) : wo.inboundChallanNumber ? (
+                            <div className="space-y-0.5">
+                              <div className="flex flex-wrap gap-1">
+                                {wo.inboundChallanNumber.split(',').map((numStr, nIdx) => (
+                                  <span
+                                    key={nIdx}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-950 font-mono font-bold text-[11px]"
+                                  >
+                                    <Truck className="w-3 h-3 text-indigo-600 shrink-0" />
+                                    {numStr.trim()}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">Party Yard Stock</span>
+                          )}
+                        </TableCell> */}
 
                         <TableCell className="py-3.5">
                           <div className="font-medium text-slate-800 text-sm">
