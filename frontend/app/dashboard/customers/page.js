@@ -60,6 +60,8 @@ import {
   CheckCircle2,
   XCircle,
   UploadCloud,
+  Layers,
+  Power,
 } from 'lucide-react';
 
 export default function CustomersPage() {
