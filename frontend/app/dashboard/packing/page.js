@@ -182,8 +182,8 @@ export default function PackingPage() {
                 ? customerObj?._id
                     ? String(customerObj._id)
                     : drum.customerId
-                      ? String(drum.customerId)
-                      : "CUSTOMER_OTHER"
+                        ? String(drum.customerId)
+                        : "CUSTOMER_OTHER"
                 : "FACTORY_OWNED";
 
             const name = isCust
@@ -336,11 +336,10 @@ export default function PackingPage() {
                 <button
                     type="button"
                     onClick={() => setActiveTab("packing-lists")}
-                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-                        activeTab === "packing-lists"
-                            ? "border-orange-600 text-orange-700"
-                            : "border-transparent text-slate-500 hover:text-slate-900"
-                    }`}
+                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${activeTab === "packing-lists"
+                        ? "border-orange-600 text-orange-700"
+                        : "border-transparent text-slate-500 hover:text-slate-900"
+                        }`}
                 >
                     <Package className="w-4 h-4" />
                     Packing Lists ({packingLists.length})
@@ -349,11 +348,10 @@ export default function PackingPage() {
                 <button
                     type="button"
                     onClick={() => setActiveTab("drums")}
-                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-                        activeTab === "drums"
-                            ? "border-orange-600 text-orange-700"
-                            : "border-transparent text-slate-500 hover:text-slate-900"
-                    }`}
+                    className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${activeTab === "drums"
+                        ? "border-orange-600 text-orange-700"
+                        : "border-transparent text-slate-500 hover:text-slate-900"
+                        }`}
                 >
                     <Layers className="w-4 h-4" />
                     Cable Drums &amp; Ref RGP Inventory ({drums.length})
@@ -425,50 +423,48 @@ export default function PackingPage() {
                                             <TableCell className="py-3 text-right font-mono font-bold text-xs text-indigo-700">
                                                 {pl.totalLengthMeters ? pl.totalLengthMeters.toLocaleString("en-IN") : "0.0"} m
                                             </TableCell>
-                                            {/* 
-                      <TableCell className="py-3">
-                        <div className="flex flex-col gap-1 items-start">
-                          <Badge variant="outline" className="font-mono text-xs bg-slate-50 font-bold text-slate-800">
-                            {pl.totalDrums || pl.drumNumbers?.length || pl.lines?.length || 0} drums
-                          </Badge>
-                          {Array.isArray(pl.drumNumbers) && pl.drumNumbers.length > 0 ? (
-                            <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
-                              {pl.drumNumbers.map((dNo, idx) => (
-                                <span
-                                  key={idx}
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
-                                  title={`Drum #${dNo}`}
-                                >
-                                  {dNo}
-                                </span>
-                              ))}
-                            </div>
-                          ) : Array.isArray(pl.lines) && pl.lines.length > 0 ? (
-                            <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
-                              {pl.lines.map((l, idx) => (
-                                <span
-                                  key={idx}
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
-                                  title={`Drum #${l.drumNumber}`}
-                                >
-                                  {l.drumNumber}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </TableCell> */}
+                                            <TableCell className="py-3">
+                                                <div className="flex flex-col gap-1 items-start">
+                                                    <Badge variant="outline" className="font-mono text-xs bg-slate-50 font-bold text-slate-800">
+                                                        {pl.totalDrums || pl.drumNumbers?.length || pl.lines?.length || 0} drums
+                                                    </Badge>
+                                                    {/* {Array.isArray(pl.drumNumbers) && pl.drumNumbers.length > 0 ? (
+                                                        <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
+                                                            {pl.drumNumbers.map((dNo, idx) => (
+                                                                <span
+                                                                    key={idx}
+                                                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
+                                                                    title={`Drum #${dNo}`}
+                                                                >
+                                                                    {dNo}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    ) : Array.isArray(pl.lines) && pl.lines.length > 0 ? (
+                                                        <div className="flex items-center gap-1 flex-wrap max-w-[220px]">
+                                                            {pl.lines.map((l, idx) => (
+                                                                <span
+                                                                    key={idx}
+                                                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 text-orange-700 border border-orange-200"
+                                                                    title={`Drum #${l.drumNumber}`}
+                                                                >
+                                                                    {l.drumNumber}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    ) : null} */}
+                                                </div>
+                                            </TableCell>
 
                                             <TableCell className="py-3">
                                                 <div className="space-y-1">
                                                     <span
-                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${
-                                                            pl.status === "CHALLAN_CREATED"
-                                                                ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                                                : pl.status === "PACKED"
-                                                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                  : "bg-amber-50 text-amber-700 border border-amber-200"
-                                                        }`}
+                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${pl.status === "CHALLAN_CREATED"
+                                                            ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                                            : pl.status === "PACKED"
+                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                                                            }`}
                                                     >
                                                         {pl.status}
                                                     </span>
@@ -553,9 +549,8 @@ export default function PackingPage() {
                             <button
                                 type="button"
                                 onClick={() => setDrumViewMode("company")}
-                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
-                                    drumViewMode === "company" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                                }`}
+                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${drumViewMode === "company" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                                    }`}
                             >
                                 <Building2 className="w-3.5 h-3.5 text-indigo-600" />
                                 Company-Wise View ({companyGroups.length})
@@ -563,9 +558,8 @@ export default function PackingPage() {
                             <button
                                 type="button"
                                 onClick={() => setDrumViewMode("flat")}
-                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
-                                    drumViewMode === "flat" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                                }`}
+                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${drumViewMode === "flat" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                                    }`}
                             >
                                 <Layers className="w-3.5 h-3.5 text-slate-600" />
                                 All Drums Flat List
@@ -820,8 +814,8 @@ export default function PackingPage() {
                                                                 <TableCell className="py-2.5 font-mono text-xs text-slate-700">
                                                                     {drum.sizeDescription ||
                                                                         (drum.flangeDiameterMm &&
-                                                                        drum.barrelDiameterMm &&
-                                                                        drum.traverseWidthMm
+                                                                            drum.barrelDiameterMm &&
+                                                                            drum.traverseWidthMm
                                                                             ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
                                                                             : "44X16X24")}
                                                                 </TableCell>
@@ -839,15 +833,14 @@ export default function PackingPage() {
                                                                 </TableCell>
                                                                 <TableCell className="py-2.5">
                                                                     <span
-                                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
-                                                                            drum.status === "AVAILABLE" || drum.status === "EMPTY"
-                                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                                : drum.status === "PACKED" || drum.status === "IN_USE"
-                                                                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                                                                  : drum.status === "DISPATCHED"
+                                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${drum.status === "AVAILABLE" || drum.status === "EMPTY"
+                                                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                                            : drum.status === "PACKED" || drum.status === "IN_USE"
+                                                                                ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                                                                : drum.status === "DISPATCHED"
                                                                                     ? "bg-blue-50 text-blue-700 border border-blue-200"
                                                                                     : "bg-slate-100 text-slate-600"
-                                                                        }`}
+                                                                            }`}
                                                                     >
                                                                         {drum.status}
                                                                     </span>
@@ -960,15 +953,14 @@ export default function PackingPage() {
                                                 </TableCell>
                                                 <TableCell className="py-2.5">
                                                     <span
-                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
-                                                            drum.status === "AVAILABLE" || drum.status === "EMPTY"
-                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                : drum.status === "PACKED" || drum.status === "IN_USE"
-                                                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                                                  : drum.status === "DISPATCHED"
+                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${drum.status === "AVAILABLE" || drum.status === "EMPTY"
+                                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                            : drum.status === "PACKED" || drum.status === "IN_USE"
+                                                                ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                                                : drum.status === "DISPATCHED"
                                                                     ? "bg-blue-50 text-blue-700 border border-blue-200"
                                                                     : "bg-slate-100 text-slate-600"
-                                                        }`}
+                                                            }`}
                                                     >
                                                         {drum.status}
                                                     </span>
