@@ -65,14 +65,41 @@ export function MaterialStockDetailsDialog({ material, open, onOpenChange }) {
   if (!material) return null;
 
   const matInfo = data?.material || material.material || material;
-  const summary = data?.summary || {
+  const allBalances = data?.balances || [];
+  const stockContext = material.stockContext;
+  const balances = stockContext?.lotId
+    ? allBalances.filter(
+        (balance) => String(balance.lotId?._id || balance.lotId || '') === String(stockContext.lotId),
+      )
+    : allBalances;
+  const summary = stockContext?.lotId
+    ? balances.reduce(
+        (totals, balance) => ({
+          totalOnHand: totals.totalOnHand + (balance.quantityOnHand || 0),
+          totalReserved: totals.totalReserved + (balance.quantityReserved || 0),
+          totalAvailable: totals.totalAvailable + (balance.quantityAvailable || 0),
+          factoryOnHand:
+            totals.factoryOnHand +
+            (balance.ownerType === 'FACTORY' ? balance.quantityOnHand || 0 : 0),
+          customerOnHand:
+            totals.customerOnHand +
+            (balance.ownerType === 'CUSTOMER' ? balance.quantityOnHand || 0 : 0),
+        }),
+        {
+          totalOnHand: 0,
+          totalReserved: 0,
+          totalAvailable: 0,
+          factoryOnHand: 0,
+          customerOnHand: 0,
+        },
+      )
+    : data?.summary || {
     totalOnHand: material.totalOnHand || 0,
     totalReserved: material.totalReserved || 0,
     totalAvailable: material.totalAvailable || 0,
     factoryOnHand: material.factoryOnHand || 0,
     customerOnHand: material.customerOnHand || 0,
   };
-  const balances = data?.balances || [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

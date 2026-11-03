@@ -97,6 +97,21 @@ export default function StockDashboardPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      const fetchAllPages = async (endpoint) => {
+        const allItems = [];
+        let page = 1;
+        let totalPages = 1;
+
+        do {
+          const response = await apiClient(`${endpoint}?limit=100&page=${page}`);
+          allItems.push(...extractItems(response));
+          totalPages = Number(response.meta?.totalPages || 1);
+          page += 1;
+        } while (page <= totalPages);
+
+        return allItems;
+      };
+
       const [
         custRes,
         matRes,
@@ -107,11 +122,11 @@ export default function StockDashboardPage() {
         scrapRes,
         lowStockRes,
       ] = await Promise.allSettled([
-        apiClient('/customers?limit=100'),
-        apiClient('/materials?limit=100'),
+        fetchAllPages('/customers'),
+        fetchAllPages('/materials'),
         apiClient('/warehouses?limit=50'),
         apiClient('/inventory/balances?limit=100'),
-        apiClient('/inbound-challans?limit=100'),
+        fetchAllPages('/inbound-challans'),
         apiClient('/outbound-challans?limit=100'),
         apiClient('/reports/dashboard'),
         apiClient('/inventory/low-stock'),
@@ -175,20 +190,37 @@ export default function StockDashboardPage() {
   // Helper to safely extract id string
   const toIdStr = (val) => {
     if (!val) return '';
-    if (typeof val === 'object') return String(val._id || val.id || '');
+    if (typeof val === 'object') {
+      if (val._id) return toIdStr(val._id);
+      if (val.id) return toIdStr(val.id);
+      if (val.$oid) return String(val.$oid);
+      if (typeof val.toHexString === 'function') return val.toHexString();
+      return '';
+    }
     return String(val);
   };
 
   // Unify and build stock rows
   const unifiedStockRows = useMemo(() => {
     const rows = [];
+    const challanById = new Map(
+      inboundChallans
+        .map((challan) => [toIdStr(challan), challan])
+        .filter(([id]) => id),
+    );
 
     // A. Current Warehouse Balances (with linked Inbound Challans via lots)
     for (const b of balances) {
       const mat = b.materialId;
-      const cust = b.customerId;
       const lot = b.lotId;
-      const linkedChallan = lot?.inboundChallanId;
+      const linkedChallan =
+        challanById.get(toIdStr(lot?.inboundChallanId)) ||
+        (typeof lot?.inboundChallanId === 'object' ? lot.inboundChallanId : null);
+      const cust =
+        b.customerId ||
+        lot?.customerId ||
+        linkedChallan?.customerId ||
+        null;
 
       const dateStr =
         linkedChallan?.customerChallanDate ||
@@ -213,6 +245,7 @@ export default function StockDashboardPage() {
         materialCode: mat?.code || '',
         unit: mat?.baseUnit || b.unit || 'KG',
         warehouseName: b.warehouseId?.name || 'Main Warehouse',
+        receivedQuantity: lot?.initialQuantity || 0,
         totalQuantity: b.quantityOnHand || 0,
         frozenQuantity: b.quantityReserved || 0,
         freeAvailableQuantity: b.quantityAvailable || 0,
@@ -256,7 +289,7 @@ export default function StockDashboardPage() {
     }
 
     return rows;
-  }, [balances, outboundChallans]);
+  }, [balances, inboundChallans, outboundChallans]);
 
   // Apply User Multi-Filters
   const filteredRows = useMemo(() => {
@@ -377,7 +410,13 @@ export default function StockDashboardPage() {
           code: row.materialCode,
           baseUnit: row.unit,
         };
-      setSelectedMaterialForStock(mat);
+      setSelectedMaterialForStock({
+        ...mat,
+        stockContext: {
+          lotId: toIdStr(row.rawRecord?.lotId),
+          challanNumber: row.challanNumber,
+        },
+      });
     } else if (row.customerId) {
       const cust =
         row.customerObj ||
@@ -441,8 +480,24 @@ export default function StockDashboardPage() {
       }
     }
 
+    // Inbound challans are the source of ownership when a balance has no
+    // direct customer reference.
+    for (const challan of inboundChallans) {
+      const id = toIdStr(challan.customerId);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        list.push({
+          value: id,
+          label: challan.customerId?.name || 'Customer',
+          subLabel: challan.customerId?.code
+            ? `Code: ${challan.customerId.code}`
+            : undefined,
+        });
+      }
+    }
+
     return list;
-  }, [customers, unifiedStockRows]);
+  }, [customers, inboundChallans, unifiedStockRows]);
 
   // Derive unique material options directly from master materials and active stock
   const materialOptions = useMemo(() => {
@@ -736,7 +791,7 @@ export default function StockDashboardPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
+                    <TableCell colSpan={9} className="py-12 text-center text-xs text-slate-500">
                       <div className="flex items-center justify-center gap-2">
                         <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
                         Loading stock &amp; challan records...
@@ -745,7 +800,7 @@ export default function StockDashboardPage() {
                   </TableRow>
                 ) : filteredRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
+                    <TableCell colSpan={9} className="py-12 text-center text-xs text-slate-500">
                       No matching stock or challan records found for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -801,6 +856,18 @@ export default function StockDashboardPage() {
                         <div className="font-mono text-[10px] text-slate-400">
                           {row.materialCode}
                         </div>
+                      </TableCell>
+
+                      {/* Received Qty */}
+                      <TableCell className="py-3 text-right font-mono font-bold text-xs text-indigo-700">
+                        {row.receivedQuantity > 0 ? (
+                          <>
+                            {row.receivedQuantity.toLocaleString('en-IN')}{' '}
+                            <span className="text-[10px] font-normal text-indigo-600/70">{row.unit}</span>
+                          </>
+                        ) : (
+                          <span className="text-slate-400 font-normal">—</span>
+                        )}
                       </TableCell>
 
                       {/* Total Qty */}
