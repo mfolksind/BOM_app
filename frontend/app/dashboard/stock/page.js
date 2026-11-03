@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiClient } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 
 import { CustomerStockOverviewDialog } from '@/components/customers/customer-stock-overview-dialog';
 import { MaterialStockDetailsDialog } from '@/components/stock/material-stock-details-dialog';
@@ -36,940 +37,824 @@ import { MaterialStockDetailsDialog } from '@/components/stock/material-stock-de
 import {
   Warehouse,
   Boxes,
-  Package,
   Layers,
   Search,
   RefreshCw,
   FilterX,
-  ChevronLeft,
-  ChevronRight,
-  TrendingDown,
-  Building2,
-  ArrowUpRight,
+  AlertTriangle,
   ArrowDownLeft,
-  ShieldAlert,
-  History,
-  FileSpreadsheet,
+  ArrowUpRight,
+  Truck,
+  Building2,
+  Calendar,
   CheckCircle2,
-  Clock,
+  Recycle,
   Eye,
 } from 'lucide-react';
 
-export default function GlobalStockDashboardPage() {
-  const [summaryData, setSummaryData] = useState(null);
-  const [balances, setBalances] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [lowStockAlerts, setLowStockAlerts] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
+export default function StockDashboardPage() {
+  // Master lists
   const [customers, setCustomers] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('materials');
+  // Data
+  const [balances, setBalances] = useState([]);
+  const [inboundChallans, setInboundChallans] = useState([]);
+  const [outboundChallans, setOutboundChallans] = useState([]);
+  const [scrapRecords, setScrapRecords] = useState([]);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+
+  // Loaders
   const [isLoading, setIsLoading] = useState(true);
-  const [isBalancesLoading, setIsBalancesLoading] = useState(true);
-  const [materialSummaries, setMaterialSummaries] = useState([]);
-  const [isMaterialSummariesLoading, setIsMaterialSummariesLoading] = useState(true);
 
-  // Filters for Balances
+  // Multi-Filter States
   const [search, setSearch] = useState('');
-  const [warehouseFilter, setWarehouseFilter] = useState('ALL');
-  const [ownerFilter, setOwnerFilter] = useState('ALL');
   const [customerFilter, setCustomerFilter] = useState('ALL');
   const [materialFilter, setMaterialFilter] = useState('ALL');
-  const [materials, setMaterials] = useState([]);
+  const [challanTypeFilter, setChallanTypeFilter] = useState('ALL'); // 'ALL' | 'INBOUND' | 'OUTBOUND'
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [lowStockOnly, setLowStockOnly] = useState(false);
 
-  // Filters for Material-Wise Global Stock
-  const [matSearch, setMatSearch] = useState('');
-  const [matCategoryFilter, setMatCategoryFilter] = useState('ALL');
-
-  // Pagination for Balances
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 15,
-    total: 0,
-    totalPages: 1,
-  });
-
-  // Modal for Customer Stock & Material Details
+  // Dialog states for click-to-open
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
 
-  // Fetch Master Data (Warehouses, Customers, Materials)
-  const fetchMasters = async () => {
+  // Helper to extract items array safely from any API response structure
+  const extractItems = (res) => {
+    if (!res) return [];
+    const payload = res.data !== undefined ? res.data : res;
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.challans)) return payload.challans;
+    if (Array.isArray(payload?.customers)) return payload.customers;
+    if (Array.isArray(payload?.materials)) return payload.materials;
+    return [];
+  };
+
+  // Fetch initial master lists and stock data
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const [whRes, custRes, matRes] = await Promise.all([
-        apiClient('/warehouses?limit=100'),
+      const [
+        custRes,
+        matRes,
+        whRes,
+        balRes,
+        inChallanRes,
+        outChallanRes,
+        scrapRes,
+        lowStockRes,
+      ] = await Promise.allSettled([
         apiClient('/customers?limit=100'),
         apiClient('/materials?limit=100'),
+        apiClient('/warehouses?limit=50'),
+        apiClient('/inventory/balances?limit=100'),
+        apiClient('/inbound-challans?limit=100'),
+        apiClient('/outbound-challans?limit=100'),
+        apiClient('/reports/dashboard'),
+        apiClient('/inventory/low-stock'),
       ]);
-      if (whRes.data) setWarehouses(whRes.data);
-      if (custRes.data) setCustomers(custRes.data);
-      if (matRes.data) {
-        setMaterials(Array.isArray(matRes.data) ? matRes.data : (matRes.data.items || []));
-      }
-    } catch (err) {
-      console.error('Failed to load masters for stock dashboard', err);
-    }
-  };
 
-  // Fetch Material-wise Global Stock Aggregation
-  const fetchMaterialSummaries = async () => {
-    setIsMaterialSummariesLoading(true);
-    try {
-      const res = await apiClient('/inventory/material-summary');
-      if (res.data) {
-        setMaterialSummaries(Array.isArray(res.data) ? res.data : []);
+      if (custRes.status === 'fulfilled') {
+        const custList = extractItems(custRes.value);
+        setCustomers(custList);
+      }
+      if (matRes.status === 'fulfilled') {
+        const matList = extractItems(matRes.value);
+        setMaterials(matList);
+      }
+      if (whRes.status === 'fulfilled') {
+        const whList = extractItems(whRes.value);
+        setWarehouses(whList);
+      }
+      if (balRes.status === 'fulfilled') {
+        const balList = extractItems(balRes.value);
+        setBalances(balList);
+      }
+      if (inChallanRes.status === 'fulfilled') {
+        const inList = extractItems(inChallanRes.value);
+        setInboundChallans(inList);
+      }
+      if (outChallanRes.status === 'fulfilled') {
+        const outList = extractItems(outChallanRes.value);
+        setOutboundChallans(outList);
+      }
+      if (scrapRes.status === 'fulfilled') {
+        const repData = scrapRes.value?.data || scrapRes.value;
+        const scraps = repData?.scrapRecords || extractItems(scrapRes.value);
+        setScrapRecords(scraps);
+      }
+      if (lowStockRes.status === 'fulfilled') {
+        const lowList = extractItems(lowStockRes.value);
+        setLowStockAlerts(lowList);
       }
     } catch (err) {
-      console.error('Failed to load material global summaries', err);
+      console.error('Error loading stock inventory data:', err);
+      toast.error('Failed to load stock data');
     } finally {
-      setIsMaterialSummariesLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  // Fetch Global Summary KPIs
-  const fetchSummary = async () => {
-    try {
-      const res = await apiClient('/inventory/summary');
-      if (res.data) {
-        setSummaryData(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to load inventory summary', err);
-    }
-  };
-
-  // Fetch Balances with pagination and filters
-  const fetchBalances = useCallback(
-    async (page = pagination.page) => {
-      setIsBalancesLoading(true);
-      try {
-        const params = new URLSearchParams();
-        params.append('page', page.toString());
-        params.append('limit', pagination.limit.toString());
-
-        if (warehouseFilter !== 'ALL') params.append('warehouseId', warehouseFilter);
-        if (ownerFilter !== 'ALL') params.append('ownerType', ownerFilter);
-        if (customerFilter !== 'ALL') params.append('customerId', customerFilter);
-        if (materialFilter !== 'ALL') params.append('materialId', materialFilter);
-
-        const res = await apiClient(`/inventory/balances?${params.toString()}`);
-        if (res.data) {
-          let items = res.data.items || [];
-          if (search.trim()) {
-            const q = search.trim().toLowerCase();
-            items = items.filter(
-              (b) =>
-                b.materialId?.name?.toLowerCase().includes(q) ||
-                b.materialId?.code?.toLowerCase().includes(q) ||
-                b.customerId?.name?.toLowerCase().includes(q)
-            );
-          }
-          setBalances(items);
-          if (res.data.total !== undefined) {
-            setPagination((prev) => ({
-              ...prev,
-              page: res.data.page,
-              total: res.data.total,
-              totalPages: res.data.totalPages,
-            }));
-          }
-        }
-      } catch (err) {
-        toast.error('Failed to load stock balances', {
-          description: err.message,
-        });
-      } finally {
-        setIsBalancesLoading(false);
-      }
-    },
-    [pagination.limit, pagination.page, warehouseFilter, ownerFilter, customerFilter, materialFilter, search]
-  );
-
-  // Fetch Recent Transactions Ledger
-  const fetchTransactions = async () => {
-    try {
-      const res = await apiClient('/inventory/transactions?limit=25');
-      if (res.data && res.data.items) {
-        setTransactions(res.data.items);
-      }
-    } catch (err) {
-      console.error('Failed to load inventory transactions', err);
-    }
-  };
-
-  // Fetch Low Stock Alerts
-  const fetchLowStock = async () => {
-    try {
-      const res = await apiClient('/inventory/low-stock');
-      if (res.data) {
-        setLowStockAlerts(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to load low stock alerts', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchMasters();
-    fetchSummary();
-    fetchMaterialSummaries();
-    fetchLowStock();
   }, []);
 
   useEffect(() => {
-    fetchBalances(1);
-  }, [warehouseFilter, ownerFilter, customerFilter, materialFilter, search]);
+    fetchData();
+  }, [fetchData]);
 
-  useEffect(() => {
-    if (activeTab === 'ledger') {
-      fetchTransactions();
+  // Set of low stock material IDs for fast lookup
+  const lowStockMaterialIdSet = useMemo(() => {
+    const s = new Set();
+    for (const a of lowStockAlerts) {
+      const mid = a.materialId?._id || a.materialId;
+      if (mid) s.add(String(mid));
     }
-  }, [activeTab]);
+    return s;
+  }, [lowStockAlerts]);
 
-  const summary = summaryData?.summary || summaryData?.stock || {};
-  const ownerBreakdown = summaryData?.ownerTypeBreakdown || [];
-  const factoryStock = summary.factoryOnHand ?? (ownerBreakdown.find((b) => b._id === 'FACTORY')?.totalOnHand || 0);
-  const customerStock = summary.customerOnHand ?? (ownerBreakdown.find((b) => b._id === 'CUSTOMER')?.totalOnHand || 0);
+  // Helper to safely extract id string
+  const toIdStr = (val) => {
+    if (!val) return '';
+    if (typeof val === 'object') return String(val._id || val.id || '');
+    return String(val);
+  };
 
-  const filteredMaterialSummaries = materialSummaries.filter((m) => {
-    const matchesSearch =
-      !matSearch.trim() ||
-      m.material?.name?.toLowerCase().includes(matSearch.trim().toLowerCase()) ||
-      m.material?.code?.toLowerCase().includes(matSearch.trim().toLowerCase());
-    const matchesCategory =
-      matCategoryFilter === 'ALL' ||
-      m.material?.category === matCategoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  // Unify and build stock rows
+  const unifiedStockRows = useMemo(() => {
+    const rows = [];
+
+    // A. Current Warehouse Balances (with linked Inbound Challans via lots)
+    for (const b of balances) {
+      const mat = b.materialId;
+      const cust = b.customerId;
+      const lot = b.lotId;
+      const linkedChallan = lot?.inboundChallanId;
+
+      const dateStr =
+        linkedChallan?.customerChallanDate ||
+        lot?.receivedDate ||
+        b.updatedAt ||
+        b.createdAt;
+
+      rows.push({
+        id: `bal-${b._id}`,
+        sourceType: 'INVENTORY_LOT',
+        challanType: 'INBOUND',
+        challanNumber:
+          linkedChallan?.customerChallanNumber ||
+          linkedChallan?.challanNumber ||
+          lot?.lotNumber ||
+          'STOCK-LOT',
+        challanDate: dateStr ? new Date(dateStr) : null,
+        companyName: cust?.name || (b.ownerType === 'FACTORY' ? 'In-House Factory' : 'Party Stock'),
+        customerId: toIdStr(cust),
+        materialId: toIdStr(mat),
+        materialName: mat?.name || 'Raw Material',
+        materialCode: mat?.code || '',
+        unit: mat?.baseUnit || b.unit || 'KG',
+        warehouseName: b.warehouseId?.name || 'Main Warehouse',
+        totalQuantity: b.quantityOnHand || 0,
+        frozenQuantity: b.quantityReserved || 0,
+        freeAvailableQuantity: b.quantityAvailable || 0,
+        scrapQuantity: 0,
+        status: b.quantityAvailable > 0 ? 'AVAILABLE' : 'RESERVED',
+        rawRecord: b,
+        customerObj: cust && typeof cust === 'object' ? cust : null,
+        materialObj: mat && typeof mat === 'object' ? mat : null,
+      });
+    }
+
+    // B. Outbound Challans (cable drums / material returns / dispatches)
+    for (const oc of outboundChallans) {
+      const cust = oc.customerId;
+      const dateVal = oc.challanDate || oc.createdAt;
+      const totalQty = oc.totalLengthMeters || oc.totalNetWeightKg || 0;
+      const item0 = oc.items?.[0];
+
+      rows.push({
+        id: `out-${oc._id}`,
+        sourceType: 'OUTBOUND_DISPATCH',
+        challanType: 'OUTBOUND',
+        challanNumber: oc.challanNumber,
+        challanDate: dateVal ? new Date(dateVal) : null,
+        companyName: cust?.name || 'Party Delivery',
+        customerId: toIdStr(cust),
+        materialId: toIdStr(item0?.productId),
+        materialName: item0?.productName || oc.sizeDescription || 'Cable Dispatch',
+        materialCode: item0?.productCode || oc.workOrderNumber || '',
+        unit: oc.totalLengthMeters ? 'MTR' : 'KG',
+        warehouseName: 'Dispatch Yard',
+        totalQuantity: totalQty,
+        frozenQuantity: 0,
+        freeAvailableQuantity: 0,
+        scrapQuantity: 0,
+        status: oc.status || 'ISSUED',
+        rawRecord: oc,
+        customerObj: cust && typeof cust === 'object' ? cust : null,
+        materialObj: item0?.productId ? { _id: item0.productId, name: item0.productName, code: item0.productCode } : null,
+      });
+    }
+
+    return rows;
+  }, [balances, outboundChallans]);
+
+  // Apply User Multi-Filters
+  const filteredRows = useMemo(() => {
+    return unifiedStockRows.filter((row) => {
+      // 1. Low stock filter toggle
+      if (lowStockOnly) {
+        if (!row.materialId || !lowStockMaterialIdSet.has(row.materialId)) {
+          return false;
+        }
+      }
+
+      // 2. Company / Customer filter
+      if (customerFilter && customerFilter !== 'ALL') {
+        if (customerFilter === 'FACTORY') {
+          if (row.customerId) return false;
+        } else if (toIdStr(row.customerId) !== toIdStr(customerFilter)) {
+          return false;
+        }
+      }
+
+      // 3. Material filter
+      if (materialFilter && materialFilter !== 'ALL') {
+        if (toIdStr(row.materialId) !== toIdStr(materialFilter)) return false;
+      }
+
+      // 4. Challan Type (Inbound vs Outbound)
+      if (challanTypeFilter && challanTypeFilter !== 'ALL') {
+        if (row.challanType !== challanTypeFilter) return false;
+      }
+
+      // 5. Date Range
+      if (startDate && row.challanDate) {
+        const s = new Date(startDate);
+        s.setHours(0, 0, 0, 0);
+        if (row.challanDate < s) return false;
+      }
+      if (endDate && row.challanDate) {
+        const e = new Date(endDate);
+        e.setHours(23, 59, 59, 999);
+        if (row.challanDate > e) return false;
+      }
+
+      // 6. Text Search (Material, Code, Challan Number, Company)
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        const matchesChallan = row.challanNumber?.toLowerCase().includes(q);
+        const matchesMat =
+          row.materialName?.toLowerCase().includes(q) ||
+          row.materialCode?.toLowerCase().includes(q);
+        const matchesComp = row.companyName?.toLowerCase().includes(q);
+        if (!matchesChallan && !matchesMat && !matchesComp) return false;
+      }
+
+      return true;
+    });
+  }, [
+    unifiedStockRows,
+    customerFilter,
+    materialFilter,
+    challanTypeFilter,
+    startDate,
+    endDate,
+    lowStockOnly,
+    search,
+    lowStockMaterialIdSet,
+  ]);
+
+  // Calculate Aggregates for filtered result
+  const aggregates = useMemo(() => {
+    let totalMaterial = 0;
+    let freezeMaterial = 0;
+    let freeAvailableMaterial = 0;
+
+    for (const r of filteredRows) {
+      if (r.challanType === 'INBOUND') {
+        totalMaterial += r.totalQuantity || 0;
+        freezeMaterial += r.frozenQuantity || 0;
+        freeAvailableMaterial += r.freeAvailableQuantity || 0;
+      }
+    }
+
+    // Scrap records calculation filtered by company and date if specified
+    let scrapMaterial = 0;
+    for (const sc of scrapRecords) {
+      if (customerFilter && customerFilter !== 'ALL' && customerFilter !== 'FACTORY') {
+        const cId = toIdStr(sc.customerId);
+        if (cId !== toIdStr(customerFilter)) continue;
+      }
+      if (materialFilter && materialFilter !== 'ALL') {
+        const mId = toIdStr(sc.materialId);
+        if (mId !== toIdStr(materialFilter)) continue;
+      }
+      if (startDate && sc.recordedAt) {
+        if (new Date(sc.recordedAt) < new Date(startDate)) continue;
+      }
+      if (endDate && sc.recordedAt) {
+        if (new Date(sc.recordedAt) > new Date(endDate)) continue;
+      }
+      scrapMaterial += sc.scrapQuantity || 0;
+    }
+
+    return {
+      totalMaterial: Number(totalMaterial.toFixed(2)),
+      freezeMaterial: Number(freezeMaterial.toFixed(2)),
+      freeAvailableMaterial: Number(freeAvailableMaterial.toFixed(2)),
+      scrapMaterial: Number(scrapMaterial.toFixed(2)),
+    };
+  }, [filteredRows, scrapRecords, customerFilter, materialFilter, startDate, endDate]);
+
+  // Handle clicking a row to open details modal
+  const handleRowClick = (row) => {
+    if (row.materialId) {
+      const mat =
+        row.materialObj ||
+        materials.find((m) => toIdStr(m) === toIdStr(row.materialId)) || {
+          _id: row.materialId,
+          name: row.materialName,
+          code: row.materialCode,
+          baseUnit: row.unit,
+        };
+      setSelectedMaterialForStock(mat);
+    } else if (row.customerId) {
+      const cust =
+        row.customerObj ||
+        customers.find((c) => toIdStr(c) === toIdStr(row.customerId)) || {
+          _id: row.customerId,
+          name: row.companyName,
+        };
+      setSelectedCustomer(cust);
+    }
+  };
+
+  // Reset all filters
+  const handleResetFilters = () => {
+    setSearch('');
+    setCustomerFilter('ALL');
+    setMaterialFilter('ALL');
+    setChallanTypeFilter('ALL');
+    setStartDate('');
+    setEndDate('');
+    setLowStockOnly(false);
+  };
+
+  const hasActiveFilters =
+    search.trim() !== '' ||
+    customerFilter !== 'ALL' ||
+    materialFilter !== 'ALL' ||
+    challanTypeFilter !== 'ALL' ||
+    startDate !== '' ||
+    endDate !== '' ||
+    lowStockOnly;
+
+  // Derive unique customer options directly from master customers and active stock
+  const customerOptions = useMemo(() => {
+    const list = [
+      { value: 'ALL', label: 'All Companies / Customers' },
+      { value: 'FACTORY', label: 'Factory / In-House Stock' },
+    ];
+    const seen = new Set();
+
+    // From master customers
+    for (const c of customers) {
+      const id = toIdStr(c);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        list.push({
+          value: id,
+          label: c.name || 'Customer',
+          subLabel: c.code ? `Code: ${c.code}` : undefined,
+        });
+      }
+    }
+
+    // From rows if not in master
+    for (const r of unifiedStockRows) {
+      if (r.customerId && !seen.has(r.customerId)) {
+        seen.add(r.customerId);
+        list.push({
+          value: r.customerId,
+          label: r.companyName || 'Customer',
+        });
+      }
+    }
+
+    return list;
+  }, [customers, unifiedStockRows]);
+
+  // Derive unique material options directly from master materials and active stock
+  const materialOptions = useMemo(() => {
+    const list = [{ value: 'ALL', label: 'All Raw Materials' }];
+    const seen = new Set();
+
+    // From master materials
+    for (const m of materials) {
+      const id = toIdStr(m);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        list.push({
+          value: id,
+          label: `${m.name || 'Material'} (${m.code || 'NO-CODE'})`,
+          subLabel: `${m.category || 'MATERIAL'} • ${m.baseUnit || 'KG'}`,
+        });
+      }
+    }
+
+    // From rows if not in master
+    for (const r of unifiedStockRows) {
+      if (r.materialId && !seen.has(r.materialId)) {
+        seen.add(r.materialId);
+        list.push({
+          value: r.materialId,
+          label: `${r.materialName} (${r.materialCode || 'STOCK'})`,
+          subLabel: r.unit,
+        });
+      }
+    }
+
+    return list;
+  }, [materials, unifiedStockRows]);
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-5 p-6 max-w-[1600px] mx-auto">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
-            <Warehouse className="w-7 h-7 text-indigo-600" />
-            Global Stock &amp; Warehouse Inventory
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+            <Warehouse className="w-5 h-5 text-indigo-600" />
+            Stock &amp; Challan Inventory Dashboard
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Real-time warehouse material balances, customer-owned job work stocks, reserved WIP allocations, and inventory movements.
+          <p className="text-xs text-slate-500 mt-0.5">
+            Real-time material stock, active inward/outward challans, and yard balances. Click any row to view breakdown.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
+          {/* Low Stock Toggle Button */}
           <Button
+            type="button"
+            variant={lowStockOnly ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setLowStockOnly((prev) => !prev)}
+            className={`h-9 px-3 gap-1.5 text-xs font-semibold cursor-pointer ${lowStockOnly
+                ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                : 'border-rose-200 text-rose-700 hover:bg-rose-50 bg-white'
+              }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+            Low Stock
+            {lowStockAlerts.length > 0 && (
+              <Badge
+                variant="outline"
+                className={`ml-1 text-[10px] px-1.5 py-0 ${lowStockOnly
+                    ? 'bg-white text-rose-700 border-white'
+                    : 'bg-rose-100 text-rose-800 border-rose-300'
+                  }`}
+              >
+                {lowStockAlerts.length}
+              </Badge>
+            )}
+          </Button>
+
+          <Button
+            type="button"
             variant="outline"
             size="sm"
-            onClick={() => {
-              fetchSummary();
-              fetchBalances(pagination.page);
-              if (activeTab === 'ledger') fetchTransactions();
-              toast.success('Inventory balances updated');
-            }}
-            disabled={isBalancesLoading}
-            className="h-9 px-3 gap-1.5 border-slate-200 text-slate-700 bg-white shadow-xs cursor-pointer"
+            onClick={fetchData}
+            disabled={isLoading}
+            className="h-9 px-3 gap-1.5 text-xs border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isBalancesLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>
       </div>
 
-      {/* KPI Cards (Clean, Professional, Unified Numbers) */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-        <Card className="border-slate-200 bg-white shadow-xs">
+      {/* KPI Cards: Dynamic based on applied filters */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+        <Card className="border-slate-200 bg-white shadow-2xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
-              Total Stock On-Hand
-            </span>
-            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
-              {summary.totalOnHand ? summary.totalOnHand.toLocaleString('en-IN') : '0.00'}
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium uppercase tracking-wider">
+              <span>Total Material</span>
+              <Boxes className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-slate-900 mt-1">
+              {aggregates.totalMaterial.toLocaleString('en-IN')}
               <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">All materials across all plants</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Total stock on hand</div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200 bg-white shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-2xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
-              Customer Job-Work Stock
-            </span>
-            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
-              {customerStock ? customerStock.toLocaleString('en-IN') : '0.00'}
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium uppercase tracking-wider">
+              <span>Freeze / Reserved</span>
+              <Layers className="w-4 h-4 text-amber-600" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-amber-700 mt-1">
+              {aggregates.freezeMaterial.toLocaleString('en-IN')}
               <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">Received on Inbound Challans</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Committed in Work Orders</div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200 bg-white shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-2xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
-              Factory Owned Stock
-            </span>
-            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
-              {factoryStock ? factoryStock.toLocaleString('en-IN') : '0.00'}
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium uppercase tracking-wider">
+              <span>Free Available</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-emerald-700 mt-1">
+              {aggregates.freeAvailableMaterial.toLocaleString('en-IN')}
               <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">Internal factory purchases</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Ready for production</div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200 bg-white shadow-xs">
+        <Card className="border-slate-200 bg-white shadow-2xs">
           <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
-              Reserved in Production
-            </span>
-            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
-              {summary.totalReserved ? summary.totalReserved.toLocaleString('en-IN') : '0.00'}
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium uppercase tracking-wider">
+              <span>Scrap Material</span>
+              <Recycle className="w-4 h-4 text-purple-600" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-purple-700 mt-1">
+              {aggregates.scrapMaterial.toLocaleString('en-IN')}
               <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">Committed to active Work Orders</div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200 bg-white shadow-xs">
-          <CardContent className="p-4">
-            <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
-              Free Available Stock
-            </span>
-            <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
-              {summary.totalAvailable ? summary.totalAvailable.toLocaleString('en-IN') : '0.00'}
-              <span className="text-xs font-normal text-slate-500 ml-1">kg</span>
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">Ready for new production</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Process loss &amp; scrap logged</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Tabs Navigation */}
-      <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setActiveTab('materials')}
-          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'materials'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          Material-Wise Global Stock ({materialSummaries.length})
-        </button>
+      {/* Multi-Filter Bar */}
+      <Card className="border-slate-200 bg-white shadow-2xs">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Inventory &amp; Challan Filters
+            </span>
+            {hasActiveFilters && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleResetFilters}
+                className="h-7 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
+              >
+                <FilterX className="w-3.5 h-3.5 mr-1" />
+                Clear Filters
+              </Button>
+            )}
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('balances')}
-          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'balances'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Boxes className="w-4 h-4" />
-          Warehouse Balances ({pagination.total})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('customers')}
-          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'customers'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          Customer Job-Work Stocks ({customers.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('ledger')}
-          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'ledger'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          Live Ledger &amp; Movements
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('low-stock')}
-          className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'low-stock'
-              ? 'border-rose-600 text-rose-700'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4 text-rose-500" />
-          Low Stock Alerts ({lowStockAlerts.length})
-        </button>
-      </div>
-
-      {/* Tab 0: Material-Wise Global Stock Aggregation */}
-      {activeTab === 'materials' && (
-        <Card className="border-t-0 rounded-t-none shadow-xs">
-          <CardHeader className="p-4 border-b border-slate-100 bg-slate-50/50">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              {/* Search Bar */}
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {/* Search Input */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">Quick Search</label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
                 <Input
-                  placeholder="Search material name or code..."
-                  value={matSearch}
-                  onChange={(e) => setMatSearch(e.target.value)}
-                  className="pl-9 h-9 text-xs bg-white border-slate-200"
-                />
-              </div>
-
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                <Select value={matCategoryFilter} onValueChange={setMatCategoryFilter}>
-                  <SelectTrigger className="w-[180px] h-9 text-xs bg-white border-slate-200">
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL" className="text-xs">All Categories</SelectItem>
-                    <SelectItem value="RAW_MATERIAL" className="text-xs">Raw Material</SelectItem>
-                    <SelectItem value="CONDUCTOR" className="text-xs">Conductor</SelectItem>
-                    <SelectItem value="INSULATION" className="text-xs">Insulation</SelectItem>
-                    <SelectItem value="SHEATHING" className="text-xs">Sheathing</SelectItem>
-                    <SelectItem value="PACKING" className="text-xs">Packing Material</SelectItem>
-                    <SelectItem value="FINISHED_GOODS" className="text-xs">Finished Goods</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {(matSearch || matCategoryFilter !== 'ALL') && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setMatSearch('');
-                      setMatCategoryFilter('ALL');
-                    }}
-                    className="h-9 px-2 text-xs text-slate-500 hover:text-slate-900 cursor-pointer"
-                  >
-                    <FilterX className="w-3.5 h-3.5 mr-1" />
-                    Reset
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-slate-50/70 border-b border-slate-200">
-                  <TableRow>
-                    <TableHead className="text-xs font-semibold text-slate-700">Material Details</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Category</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Base Unit</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Global On-Hand</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Reserved in WIP</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Free Available</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Ownership Breakdown</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isMaterialSummariesLoading ? (
-                    Array.from({ length: 6 }).map((_, i) => (
-                      <TableRow key={i}>
-                        <TableCell colSpan={8} className="py-4 text-center text-xs text-slate-400">
-                          Loading global material stocks...
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : filteredMaterialSummaries.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="py-12 text-center text-slate-500 text-xs">
-                        No materials found matching your search.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredMaterialSummaries.map((item) => (
-                      <TableRow key={item._id} className="hover:bg-slate-50/60">
-                        <TableCell className="py-3">
-                          <div className="font-semibold text-xs text-slate-900">
-                            {item.material?.name || 'Material'}
-                          </div>
-                          <span className="font-mono text-[11px] text-slate-500">
-                            {item.material?.code}
-                          </span>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-xs text-slate-600">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                            {item.material?.category || 'RAW_MATERIAL'}
-                          </span>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-xs font-mono font-medium text-slate-700">
-                          {item.material?.baseUnit || 'KG'}
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
-                          {item.totalOnHand?.toLocaleString('en-IN')}{' '}
-                          <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-medium text-xs text-slate-900">
-                          {item.totalReserved > 0 ? (
-                            <span>
-                              {item.totalReserved?.toLocaleString('en-IN')}{' '}
-                              <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 font-normal">0.00</span>
-                          )}
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
-                          {item.totalAvailable?.toLocaleString('en-IN')}{' '}
-                          <span className="text-slate-500 font-normal">{item.material?.baseUnit || 'KG'}</span>
-                        </TableCell>
-
-                        <TableCell className="py-3">
-                          <div className="flex flex-col gap-0.5 text-[11px]">
-                            <span className="text-slate-700">
-                              <span className="text-slate-500">Customer:</span>{' '}
-                              <span className="font-mono font-bold text-slate-900">{item.customerOnHand?.toLocaleString('en-IN') || '0'}</span>
-                            </span>
-                            <span className="text-slate-700">
-                              <span className="text-slate-500">Factory:</span>{' '}
-                              <span className="font-mono font-bold text-slate-900">{item.factoryOnHand?.toLocaleString('en-IN') || '0'}</span>
-                            </span>
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setSelectedMaterialForStock(item)}
-                            className="h-8 px-2.5 text-xs font-medium gap-1 text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-indigo-600 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            View Specifics
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Tab 1: Material Balances Table */}
-      {activeTab === 'balances' && (
-        <Card className="border-t-0 rounded-t-none shadow-xs">
-          <CardHeader className="p-4 border-b border-slate-100 bg-slate-50/50">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              {/* Search Bar */}
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                <Input
-                  placeholder="Search material code or name..."
+                  placeholder="Challan #, material..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 h-9 text-xs bg-white border-slate-200"
+                  className="pl-8 h-9 text-xs bg-slate-50/50 border-slate-200"
                 />
               </div>
-
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                {/* Warehouse */}
-                <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-                  <SelectTrigger className="w-[170px] h-9 text-xs bg-white border-slate-200">
-                    <SelectValue placeholder="All Warehouses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL" className="text-xs">All Warehouses</SelectItem>
-                    {warehouses.map((wh) => (
-                      <SelectItem key={wh._id} value={wh._id} className="text-xs">
-                        {wh.name} ({wh.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Owner Type */}
-                <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                  <SelectTrigger className="w-[160px] h-9 text-xs bg-white border-slate-200">
-                    <SelectValue placeholder="All Ownership" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL" className="text-xs">All Ownership</SelectItem>
-                    <SelectItem value="CUSTOMER" className="text-xs">Customer Job-Work</SelectItem>
-                    <SelectItem value="FACTORY" className="text-xs">Factory Owned</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Customer Filter */}
-                <Select value={customerFilter} onValueChange={setCustomerFilter}>
-                  <SelectTrigger className="w-[180px] h-9 text-xs bg-white border-slate-200">
-                    <SelectValue placeholder="All Customers" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL" className="text-xs">All Customers</SelectItem>
-                    {customers.map((c) => (
-                      <SelectItem key={c._id} value={c._id} className="text-xs">
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Material Filter */}
-                <Select value={materialFilter} onValueChange={setMaterialFilter}>
-                  <SelectTrigger className="w-[180px] h-9 text-xs bg-white border-slate-200">
-                    <SelectValue placeholder="All Materials" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL" className="text-xs">All Materials</SelectItem>
-                    {materials.map((m) => (
-                      <SelectItem key={m._id} value={m._id} className="text-xs">
-                        {m.name} ({m.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {(search || warehouseFilter !== 'ALL' || ownerFilter !== 'ALL' || customerFilter !== 'ALL' || materialFilter !== 'ALL') && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setSearch('');
-                      setWarehouseFilter('ALL');
-                      setOwnerFilter('ALL');
-                      setCustomerFilter('ALL');
-                      setMaterialFilter('ALL');
-                    }}
-                    className="h-9 px-2 text-xs text-slate-500 hover:text-slate-900 cursor-pointer"
-                  >
-                    <FilterX className="w-3.5 h-3.5 mr-1" />
-                    Reset
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-slate-50/70 border-b border-slate-200">
-                  <TableRow>
-                    <TableHead className="text-xs font-semibold text-slate-700">Material</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Category</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Warehouse</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700">Ownership / Customer</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">On-Hand</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Reserved</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-700 text-right">Available Free</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isBalancesLoading ? (
-                    Array.from({ length: 6 }).map((_, i) => (
-                      <TableRow key={i}>
-                        <TableCell colSpan={7} className="py-4 text-center text-xs text-slate-400">
-                          Loading inventory balances...
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : balances.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="py-12 text-center text-slate-500 text-xs">
-                        No material stock balances match the selected filters.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    balances.map((b, idx) => (
-                      <TableRow key={b._id || idx} className="hover:bg-slate-50/50">
-                        <TableCell className="py-3">
-                          <div className="font-semibold text-xs text-slate-900">
-                            {b.materialId?.name || 'Raw Material'}
-                          </div>
-                          <span className="font-mono text-[11px] text-slate-500">
-                            {b.materialId?.code}
-                          </span>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-xs text-slate-600">
-                          {b.materialId?.category || 'RAW_MATERIAL'}
-                        </TableCell>
-
-                        <TableCell className="py-3 text-xs text-slate-700 font-medium">
-                          {b.warehouseId?.name || 'Main Warehouse'}
-                        </TableCell>
-
-                        <TableCell className="py-3">
-                          {b.ownerType === 'CUSTOMER' ? (
-                            <div className="flex flex-col">
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full w-fit">
-                                <Building2 className="w-3 h-3" />
-                                {b.customerId?.name || 'Customer Job-Work'}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center text-[11px] font-medium text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full w-fit">
-                              Factory Owned
-                            </span>
-                          )}
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
-                          {b.quantityOnHand?.toLocaleString('en-IN')}{' '}
-                          <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-medium text-xs text-slate-900">
-                          {b.quantityReserved > 0 ? (
-                            <span>
-                              {b.quantityReserved?.toLocaleString('en-IN')}{' '}
-                              <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 font-normal">0.00</span>
-                          )}
-                        </TableCell>
-
-                        <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
-                          {b.quantityAvailable?.toLocaleString('en-IN')}{' '}
-                          <span className="text-slate-500 font-normal">{b.materialId?.baseUnit || 'KG'}</span>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/40 text-xs text-slate-600">
-              <span>
-                Showing Page <span className="font-semibold text-slate-900">{pagination.page}</span>{' '}
-                of <span className="font-semibold text-slate-900">{pagination.totalPages || 1}</span>{' '}
-                ({pagination.total} total items)
-              </span>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fetchBalances(pagination.page - 1)}
-                  disabled={pagination.page <= 1 || isBalancesLoading}
-                  className="h-8 px-2.5 border-slate-200 cursor-pointer text-xs"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5 mr-1" />
-                  Prev
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fetchBalances(pagination.page + 1)}
-                  disabled={pagination.page >= pagination.totalPages || isBalancesLoading}
-                  className="h-8 px-2.5 border-slate-200 cursor-pointer text-xs"
-                >
-                  Next
-                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                </Button>
-              </div>
+            {/* Company / Customer */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">Company / Customer</label>
+              <SearchableSelect
+                options={customerOptions}
+                value={customerFilter}
+                onChange={(val) => setCustomerFilter(val || 'ALL')}
+                placeholder="All Companies"
+                searchPlaceholder="Search company..."
+                className="h-9 text-xs bg-slate-50/50 border-slate-200"
+              />
             </div>
-          </CardContent>
-        </Card>
-      )}
 
-      {/* Tab 2: Customer Job-Work Stocks */}
-      {activeTab === 'customers' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {customers.map((c) => (
-            <Card key={c._id} className="border-slate-200 hover:border-indigo-300 transition-all shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-slate-100 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-sm font-bold text-slate-900">{c.name}</CardTitle>
-                  <CardDescription className="text-xs font-mono text-slate-500">{c.code}</CardDescription>
-                </div>
-                <Badge variant="outline" className="text-[11px] font-mono text-slate-600">
-                  GSTIN: {c.gstin || 'N/A'}
-                </Badge>
-              </CardHeader>
-              <CardContent className="p-4 pt-3 space-y-3">
-                <div className="text-xs text-slate-600 flex justify-between">
-                  <span>Contact:</span>
-                  <span className="font-medium text-slate-900">{c.contactPerson || '—'} ({c.phone || '—'})</span>
-                </div>
-                <div className="text-xs text-slate-600 flex justify-between">
-                  <span>City / State:</span>
-                  <span className="text-slate-800">{c.billingAddress?.city || '—'}, {c.billingAddress?.state || '—'}</span>
-                </div>
+            {/* Material */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">Material</label>
+              <SearchableSelect
+                options={materialOptions}
+                value={materialFilter}
+                onChange={(val) => setMaterialFilter(val || 'ALL')}
+                placeholder="All Materials"
+                searchPlaceholder="Search material..."
+                className="h-9 text-xs bg-slate-50/50 border-slate-200"
+              />
+            </div>
 
-                <div className="pt-2 border-t border-slate-100">
-                  <Button
-                    size="sm"
-                    onClick={() => setSelectedCustomer(c)}
-                    className="w-full h-8 text-xs font-semibold gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    View Customer Stock &amp; Challans
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+            {/* Challan Type */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">Challan Direction</label>
+              <Select value={challanTypeFilter} onValueChange={setChallanTypeFilter}>
+                <SelectTrigger className="h-9 text-xs bg-slate-50/50 border-slate-200 text-slate-800">
+                  <SelectValue placeholder="All Challans" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL" className="text-xs">All Challans</SelectItem>
+                  <SelectItem value="INBOUND" className="text-xs">
+                    <span className="flex items-center gap-1.5 text-emerald-700">
+                      <ArrowDownLeft className="w-3.5 h-3.5" />
+                      Inbound Challans
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="OUTBOUND" className="text-xs">
+                    <span className="flex items-center gap-1.5 text-blue-700">
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                      Outbound Challans
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-      {/* Tab 3: Recent Transactions Ledger */}
-      {activeTab === 'ledger' && (
-        <Card className="border-t-0 rounded-t-none shadow-xs">
-          <CardHeader className="p-4 border-b border-slate-100 bg-slate-50/50">
-            <CardTitle className="text-sm font-bold text-slate-800">
-              Live Material Transaction Movements
+            {/* Start Date */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">Start Date</label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="h-9 text-xs bg-slate-50/50 border-slate-200"
+              />
+            </div>
+
+            {/* End Date */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-slate-600">End Date</label>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="h-9 text-xs bg-slate-50/50 border-slate-200"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Main Stock & Challan Inventory Table */}
+      <Card className="border-slate-200 bg-white shadow-2xs">
+        <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-bold text-slate-900">
+              Inventory Records ({filteredRows.length})
             </CardTitle>
             <CardDescription className="text-xs text-slate-500">
-              Complete audit trail of receipts (Inbound Challans), batch WIP issues, and dispatches.
+              Click any record to inspect detailed lots, warehouse balances, or customer stock overview.
             </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="bg-slate-50/70 border-b border-slate-200">
+              <TableHeader className="bg-slate-50/80 border-b border-slate-200">
                 <TableRow>
-                  <TableHead className="text-xs font-semibold text-slate-700">Date &amp; Ref</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700">Material</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700">Type</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700">Warehouse</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700">Ownership / Customer</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700 text-right">Quantity</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 py-3">Challan &amp; Date</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 py-3">Type</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 py-3">Company / Party</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 py-3">Material Name &amp; Code</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 text-right py-3">Received Qty</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 text-right py-3">Total Qty</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 text-right py-3">Freeze Qty</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 text-right py-3">Free Available</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-700 text-center py-3">Status</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {transactions.length === 0 ? (
+                {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-xs text-slate-500">
-                      No material movements recorded yet.
+                    <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
+                      <div className="flex items-center justify-center gap-2">
+                        <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                        Loading stock &amp; challan records...
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-12 text-center text-xs text-slate-500">
+                      No matching stock or challan records found for the selected filters.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  transactions.map((tx, idx) => (
-                    <TableRow key={tx._id || idx} className="hover:bg-slate-50/50">
-                      <TableCell className="py-2.5">
-                        <div className="font-mono text-xs font-semibold text-slate-900">
-                          {tx.transactionNumber || tx.sourceDocumentNumber || 'TXN'}
+                  filteredRows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      onClick={() => handleRowClick(row)}
+                      className="hover:bg-indigo-50/50 cursor-pointer transition-colors group"
+                    >
+                      {/* Challan & Date */}
+                      <TableCell className="py-3">
+                        <div className="flex items-center gap-1.5 font-bold font-mono text-xs text-slate-900 group-hover:text-indigo-600 transition-colors">
+                          <Truck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span>{row.challanNumber}</span>
                         </div>
-                        <span className="text-[11px] text-slate-400">
-                          {tx.postedAt ? new Date(tx.postedAt).toLocaleString('en-IN') : '—'}
-                        </span>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {row.challanDate ? row.challanDate.toLocaleDateString() : 'Active Stock'}
+                        </div>
                       </TableCell>
-                      <TableCell className="py-2.5 text-xs text-slate-900 font-medium">
-                        {tx.materialId?.name || 'Raw Material'}
-                        <div className="font-mono text-[10px] text-slate-400">{tx.materialId?.code}</div>
-                      </TableCell>
-                      <TableCell className="py-2.5">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold ${
-                            tx.transactionType === 'INBOUND_RECEIPT'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : tx.transactionType === 'PRODUCTION_ISSUE'
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-blue-50 text-blue-700 border border-blue-200'
-                          }`}
-                        >
-                          {tx.transactionType}
-                        </span>
-                      </TableCell>
-                      <TableCell className="py-2.5 text-xs text-slate-700">
-                        {tx.warehouseId?.name || 'Warehouse'}
-                      </TableCell>
-                      <TableCell className="py-2.5 text-xs text-slate-700">
-                        {tx.customerId?.name || 'Factory'}
-                      </TableCell>
-                      <TableCell
-                        className={`py-2.5 text-right font-mono font-bold text-xs ${
-                          tx.quantity > 0 ? 'text-emerald-700' : 'text-slate-900'
-                        }`}
-                      >
-                        {tx.quantity > 0 ? `+${tx.quantity}` : tx.quantity} {tx.materialId?.baseUnit || 'KG'}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
 
-      {/* Tab 4: Low Stock Alerts */}
-      {activeTab === 'low-stock' && (
-        <Card className="border-t-0 rounded-t-none shadow-xs">
-          <CardHeader className="p-4 border-b border-slate-100 bg-slate-50/50">
-            <CardTitle className="text-sm font-bold text-rose-800 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-600" />
-              Safety Stock &amp; Reorder Level Breaches
-            </CardTitle>
-            <CardDescription className="text-xs text-slate-500">
-              Materials whose current on-hand quantity is below the minimum threshold.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader className="bg-slate-50/70 border-b border-slate-200">
-                <TableRow>
-                  <TableHead className="text-xs font-semibold text-slate-700">Material Name &amp; Code</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700">Warehouse</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700 text-right">Current Available</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700 text-right">Min Threshold</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-700 text-right">Deficit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lowStockAlerts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-12 text-center text-xs text-emerald-700 font-medium">
-                      All material balances are healthy above safety reorder thresholds!
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  lowStockAlerts.map((alert, idx) => (
-                    <TableRow key={idx} className="hover:bg-slate-50/50">
-                      <TableCell className="py-3 text-xs font-medium text-slate-900">
-                        {alert.materialName || alert.materialId?.name}
-                        <div className="font-mono text-[10px] text-slate-400">{alert.materialCode}</div>
+                      {/* Direction */}
+                      <TableCell className="py-3">
+                        {row.challanType === 'INBOUND' ? (
+                          <Badge variant="outline" className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
+                            <ArrowDownLeft className="w-3 h-3" />
+                            Inbound
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] font-semibold bg-blue-50 text-blue-700 border-blue-200 gap-1">
+                            <ArrowUpRight className="w-3 h-3" />
+                            Outbound
+                          </Badge>
+                        )}
                       </TableCell>
-                      <TableCell className="py-3 text-xs text-slate-700">
-                        {alert.warehouseName || 'All Warehouses'}
+
+                      {/* Company */}
+                      <TableCell className="py-3">
+                        <div className="text-xs font-medium text-slate-900 flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{row.companyName}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 pl-5">
+                          {row.warehouseName}
+                        </div>
                       </TableCell>
-                      <TableCell className="py-3 text-right font-mono font-bold text-xs text-rose-700">
-                        {alert.currentStock} {alert.baseUnit || 'KG'}
+
+                      {/* Material */}
+                      <TableCell className="py-3">
+                        <div className="text-xs font-semibold text-slate-900">
+                          {row.materialName}
+                        </div>
+                        <div className="font-mono text-[10px] text-slate-400">
+                          {row.materialCode}
+                        </div>
                       </TableCell>
-                      <TableCell className="py-3 text-right font-mono text-xs text-slate-600">
-                        {alert.minStockThreshold} {alert.baseUnit || 'KG'}
+
+                      {/* Total Qty */}
+                      <TableCell className="py-3 text-right font-mono font-bold text-xs text-slate-900">
+                        {row.totalQuantity.toLocaleString('en-IN')}{' '}
+                        <span className="text-[10px] font-normal text-slate-400">{row.unit}</span>
                       </TableCell>
-                      <TableCell className="py-3 text-right font-mono font-bold text-xs text-rose-600">
-                        -{alert.shortageQuantity} {alert.baseUnit || 'KG'}
+
+                      {/* Freeze Qty */}
+                      <TableCell className="py-3 text-right font-mono text-xs text-amber-700 font-semibold">
+                        {row.frozenQuantity > 0 ? (
+                          <>
+                            {row.frozenQuantity.toLocaleString('en-IN')}{' '}
+                            <span className="text-[10px] font-normal text-amber-600/70">{row.unit}</span>
+                          </>
+                        ) : (
+                          <span className="text-slate-400 font-normal">0</span>
+                        )}
+                      </TableCell>
+
+                      {/* Free Available Qty */}
+                      <TableCell className="py-3 text-right font-mono font-bold text-xs text-emerald-700">
+                        {row.freeAvailableQuantity > 0 ? (
+                          <>
+                            {row.freeAvailableQuantity.toLocaleString('en-IN')}{' '}
+                            <span className="text-[10px] font-normal text-emerald-600/70">{row.unit}</span>
+                          </>
+                        ) : (
+                          <span className="text-slate-400 font-normal">0</span>
+                        )}
+                      </TableCell>
+
+                      {/* Status */}
+                      <TableCell className="py-3 text-center">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-semibold ${row.freeAvailableQuantity > 0
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : row.frozenQuantity > 0
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                        >
+                          {row.status}
+                        </Badge>
                       </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Customer Stock Overview Dialog */}
       {selectedCustomer && (

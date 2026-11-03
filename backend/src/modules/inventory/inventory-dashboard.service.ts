@@ -366,7 +366,14 @@ export class InventoryDashboardService {
         .populate('materialId', 'code name category baseUnit')
         .populate('warehouseId', 'code name')
         .populate('customerId', 'code name')
-        .populate('lotId', 'lotNumber initialQuantity currentBalance')
+        .populate({
+          path: 'lotId',
+          select: 'lotNumber initialQuantity currentBalance receivedDate inboundChallanId',
+          populate: {
+            path: 'inboundChallanId',
+            select: 'challanNumber customerChallanNumber customerChallanDate vehicleNumber status',
+          },
+        })
         .lean(),
       InventoryBalanceModel.countDocuments(filter),
     ]);
