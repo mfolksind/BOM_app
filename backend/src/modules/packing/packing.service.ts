@@ -197,12 +197,12 @@ export class PackingService {
       dto.drums && dto.drums.length > 0
         ? dto.drums
         : Array.from({ length: dto.quantity || 1 }, (_, i) => ({
-            drumNumber: `${dto.prefix || 'MF/'}${String(i + 1).padStart(2, '0')}`,
-            drumSize: dto.drumSize || '44X16X24',
-            drumType: (dto.drumType as DrumType) || 'WOODEN',
-            tareWeightKg: dto.tareWeightKg ?? 150,
-            remarks: 'STD.LENGTH',
-          }));
+          drumNumber: `${dto.prefix || 'MF/'}${String(i + 1).padStart(2, '0')}`,
+          drumSize: dto.drumSize || '44X16X24',
+          drumType: (dto.drumType as DrumType) || 'WOODEN',
+          tareWeightKg: dto.tareWeightKg ?? 150,
+          remarks: 'STD.LENGTH',
+        }));
 
     for (let i = 0; i < drumItems.length; i++) {
       const d = drumItems[i];
@@ -567,26 +567,14 @@ export class PackingService {
       throw new BadRequestError('Work order does not belong to the selected customer');
     }
 
-    if (workOrder.status !== 'COMPLETED') {
+    if (workOrder.status === 'CANCELLED') {
       throw new BadRequestError(
-        `Cannot create packing list for work order '${workOrder.workOrderNumber}'. Order must be marked as COMPLETED before packing drums. Current status: '${workOrder.status}'`,
-      );
-    }
-
-    // Check if work order has already been utilized to make a packing list
-    const existingActiveList = await PackingListModel.findOne({
-      workOrderId: workOrder._id,
-      status: { $ne: 'CANCELLED' },
-    });
-    if (existingActiveList) {
-      throw new BadRequestError(
-        `Work order '${workOrder.workOrderNumber}' has already been utilized in Packing List '${existingActiveList.packingListNumber}'. It cannot be packed again.`,
+        `Cannot create packing list for cancelled work order '${workOrder.workOrderNumber}'.`,
       );
     }
 
     // Finished Goods Availability Check:
-    // If output is recorded in production stages, enforce that limit;
-    // otherwise fallback to PO/Work Order planned length to allow direct 2-step PO -> Packaging workflow
+    // Allow partial packing of any active or completed work order up to orderedLengthMeters (or recorded output if higher).
     const outputs = await ProductionOutputModel.find({
       workOrderId: workOrder._id,
       status: 'POSTED',
@@ -595,19 +583,27 @@ export class PackingService {
     });
     const totalGoodOutputMeters = outputs.reduce((sum, o) => sum + o.outputLengthMeters, 0);
 
-    // Total already packed in active packing lists
+    // Total already packed across all active packing lists (partial shipments)
     const existingPackingLists = await PackingListModel.find({
       workOrderId: workOrder._id,
-      status: { $in: ['PACKED', 'COMPLETED', 'DISPATCHED'] },
+      status: { $ne: 'CANCELLED' },
     });
     const alreadyPackedMeters = existingPackingLists.reduce(
-      (sum, p) => sum + p.totalLengthMeters,
+      (sum, p) => sum + (p.totalLengthMeters || 0),
       0,
     );
 
-    const maxAllowedMeters =
-      totalGoodOutputMeters > 0 ? totalGoodOutputMeters : (workOrder.orderedLengthMeters || 1000000);
-    const availableToPackMeters = Math.max(0, maxAllowedMeters - alreadyPackedMeters);
+    const maxAllowedMeters = Math.max(
+      totalGoodOutputMeters,
+      workOrder.orderedLengthMeters || 1000000,
+    );
+    const availableToPackMeters = Math.max(0, Number((maxAllowedMeters - alreadyPackedMeters).toFixed(2)));
+
+    if (availableToPackMeters <= 0) {
+      throw new BadRequestError(
+        `Work order '${workOrder.workOrderNumber}' has no remaining length to pack. Ordered/available: ${maxAllowedMeters} m, already packed: ${alreadyPackedMeters} m across ${existingPackingLists.length} packing list(s).`,
+      );
+    }
 
     // Ensure drumId is resolved for all lines, even if manually typed
     for (const l of dto.lines) {
@@ -741,7 +737,7 @@ export class PackingService {
 
     if (calculatedLength > availableToPackMeters) {
       throw new BadRequestError(
-        `Requested packing length (${calculatedLength} m) exceeds available finished output (${availableToPackMeters} m). Total output: ${totalGoodOutputMeters} m, already packed: ${alreadyPackedMeters} m.`,
+        `Requested packing length (${calculatedLength} m) exceeds remaining available length (${availableToPackMeters} m) for work order '${workOrder.workOrderNumber}'. Max: ${maxAllowedMeters} m, already packed: ${alreadyPackedMeters} m. Create a smaller partial packing list / outbound challan for the leftover quantity.`,
       );
     }
 
@@ -754,6 +750,12 @@ export class PackingService {
       workOrderId: workOrder._id,
       workOrderNumber: dto.workOrderNumber || workOrder.workOrderNumber,
       workOrderDate: dto.workOrderDate ? new Date(dto.workOrderDate) : workOrder.createdAt,
+      inboundChallanId: workOrder.inboundChallanId,
+      inboundChallanNumber:
+        workOrder.inboundChallanNumber ||
+        (Array.isArray(workOrder.inboundChallanNumbers) && workOrder.inboundChallanNumbers.length > 0
+          ? workOrder.inboundChallanNumbers.join(', ')
+          : undefined),
       sizeDescription,
       invoiceNumber: dto.invoiceNumber,
       challanNumber: dto.challanNumber,
@@ -779,6 +781,16 @@ export class PackingService {
       });
     }
 
+    // Update Work Order completed / packed length & status
+    const newTotalPacked = Number((alreadyPackedMeters + packingList.totalLengthMeters).toFixed(2));
+    workOrder.deliveredLengthMeters = newTotalPacked;
+    if (workOrder.orderedLengthMeters && newTotalPacked >= workOrder.orderedLengthMeters) {
+      workOrder.status = 'COMPLETED';
+    } else if (workOrder.status === 'DRAFT' || workOrder.status === 'CONFIRMED') {
+      workOrder.status = 'IN_PROGRESS';
+    }
+    await workOrder.save();
+
     if (userId) {
       await InventoryAuditUtil.record({
         action: 'CREATE',
@@ -799,9 +811,10 @@ export class PackingService {
   async getPackingListById(id: string) {
     const packingList = await PackingListModel.findById(id)
       .populate('customerId', 'code name')
-      .populate('workOrderId', 'workOrderNumber orderedLengthMeters status createdAt')
+      .populate('workOrderId', 'workOrderNumber orderedLengthMeters deliveredLengthMeters inboundChallanNumber inboundChallanNumbers status createdAt')
       .populate('productId', 'code name voltageGrade coreCount crossSectionSqMm description')
       .populate('packingWarehouseId', 'code name type')
+      .populate('outboundChallanId', 'challanNumber invoiceNumber status totalLengthMeters')
       .populate('packedBy', 'firstName lastName email');
 
     if (!packingList) throw new NotFoundError(`Packing list with ID '${id}' not found`);
@@ -838,8 +851,9 @@ export class PackingService {
     const [packingLists, total] = await Promise.all([
       PackingListModel.find(query)
         .populate('customerId', 'code name')
-        .populate('workOrderId', 'workOrderNumber')
+        .populate('workOrderId', 'workOrderNumber orderedLengthMeters deliveredLengthMeters inboundChallanNumber inboundChallanNumbers status')
         .populate('productId', 'code name')
+        .populate('outboundChallanId', 'challanNumber invoiceNumber status totalLengthMeters')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(filter.limit),
@@ -931,7 +945,7 @@ export class PackingService {
 
         const lengthBottom = lineDto.lengthBottom ?? 0;
         const lengthTop = lineDto.lengthTop ?? (lineDto.lengthMeters ?? drum.cableLengthMeters);
-        const lengthTotal = lineDto.lengthTotal || (lengthBottom + lengthTop);
+        const lengthTotal = lineDto.lengthTotal || (lengthTop - lengthBottom);
         const lengthMeters = lengthTotal > 0 ? lengthTotal : (lineDto.lengthMeters ?? drum.cableLengthMeters);
 
         const tareWeightKg = lineDto.tareWeightKg ?? drum.tareWeightKg;
@@ -1073,6 +1087,28 @@ export class PackingService {
       if (userId) pl.packedBy = new mongoose.Types.ObjectId(userId);
       await pl.save({ session });
 
+      // Sync Work Order completed / packed length & status
+      if (pl.workOrderId) {
+        const wo = await WorkOrderModel.findById(pl.workOrderId).session(session);
+        if (wo) {
+          const allActivePls = await PackingListModel.find({
+            workOrderId: wo._id,
+            status: { $ne: 'CANCELLED' },
+          }).session(session);
+          const totalPacked = allActivePls.reduce(
+            (sum, p) => sum + (p.totalLengthMeters || 0),
+            0,
+          );
+          wo.deliveredLengthMeters = Number(totalPacked.toFixed(2));
+          if (wo.orderedLengthMeters && totalPacked >= wo.orderedLengthMeters) {
+            wo.status = 'COMPLETED';
+          } else if (wo.status === 'DRAFT' || wo.status === 'CONFIRMED') {
+            wo.status = 'IN_PROGRESS';
+          }
+          await wo.save({ session });
+        }
+      }
+
       return pl;
     });
 
@@ -1143,6 +1179,25 @@ export class PackingService {
       pl.cancelReason = reason;
       if (userId) pl.cancelledBy = new mongoose.Types.ObjectId(userId);
       await pl.save({ session });
+
+      if (pl.workOrderId) {
+        const wo = await WorkOrderModel.findById(pl.workOrderId).session(session);
+        if (wo) {
+          const remainingPls = await PackingListModel.find({
+            workOrderId: wo._id,
+            status: { $ne: 'CANCELLED' },
+          }).session(session);
+          const totalPacked = remainingPls.reduce(
+            (sum, p) => sum + (p.totalLengthMeters || 0),
+            0,
+          );
+          wo.deliveredLengthMeters = Number(totalPacked.toFixed(2));
+          if (wo.status === 'COMPLETED' && totalPacked < (wo.orderedLengthMeters || 0)) {
+            wo.status = totalPacked > 0 ? 'IN_PROGRESS' : 'CONFIRMED';
+          }
+          await wo.save({ session });
+        }
+      }
 
       return pl;
     });
@@ -1297,12 +1352,26 @@ export class PackingService {
     if (!lines.length)
       throw new BadRequestError('Cannot generate challan for an empty packing list');
 
-    // Return existing if already generated and active
+    // Return or update existing if already generated and active
     const existing = await OutboundChallanModel.findOne({
       packingListId: packingList._id,
       status: { $ne: 'CANCELLED' },
     });
     if (existing) {
+      if (dto) {
+        if (dto.challanNumber) existing.challanNumber = dto.challanNumber;
+        if (dto.invoiceNumber) existing.invoiceNumber = dto.invoiceNumber;
+        if (dto.vehicleNumber) existing.vehicleNumber = dto.vehicleNumber;
+        if (dto.transporter) existing.transporter = dto.transporter;
+        if (dto.lrNumber) existing.lrNumber = dto.lrNumber;
+        if (dto.eWayBillNumber) existing.eWayBillNumber = dto.eWayBillNumber;
+        if (dto.deliveryTerms) existing.deliveryTerms = dto.deliveryTerms;
+        if (dto.remarks) existing.remarks = dto.remarks;
+        await existing.save();
+        if (dto.challanNumber) packingList.challanNumber = dto.challanNumber;
+        if (dto.invoiceNumber) packingList.invoiceNumber = dto.invoiceNumber;
+        await packingList.save();
+      }
       return existing;
     }
 

@@ -106,6 +106,7 @@ export class InboundChallansService {
             declaredQuantity: line.declaredQuantity,
             receivedQuantity: line.receivedQuantity,
             unit: line.unit,
+            unitRate: line.unitRate,
             supplierLotNumber: line.supplierLotNumber,
             qualityStatus: 'PENDING_QC',
             remarks: line.remarks,
@@ -190,7 +191,7 @@ export class InboundChallansService {
     }
 
     const lines = await InboundChallanLineModel.find({ inboundChallanId: challan._id })
-      .populate('materialId', 'code name category baseUnit')
+      .populate('materialId', 'code name category baseUnit standardRate')
       .populate('lotId', 'lotNumber initialQuantity currentBalance qualityStatus');
 
     return {
@@ -305,6 +306,7 @@ export class InboundChallansService {
           declaredQuantity: l.declaredQuantity,
           receivedQuantity: l.receivedQuantity,
           unit: l.unit,
+          unitRate: l.unitRate,
           supplierLotNumber: l.supplierLotNumber,
           qualityStatus: 'PENDING_QC',
           remarks: l.remarks,

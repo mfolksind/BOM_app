@@ -104,6 +104,12 @@ export function EditInboundChallanDialog({
                 declaredQuantity: l.declaredQuantity || '',
                 receivedQuantity: l.receivedQuantity !== undefined ? l.receivedQuantity : l.declaredQuantity,
                 unit: l.unit || 'KG',
+                unitRate:
+                  l.unitRate !== undefined && l.unitRate !== null
+                    ? String(l.unitRate)
+                    : l.materialId?.standardRate !== undefined && l.materialId?.standardRate !== null
+                      ? String(l.materialId.standardRate)
+                      : '',
                 supplierLotNumber: l.supplierLotNumber || '',
                 remarks: l.remarks || '',
               })),
@@ -129,6 +135,7 @@ export function EditInboundChallanDialog({
           declaredQuantity: '',
           receivedQuantity: '',
           unit: 'KG',
+          unitRate: '',
           supplierLotNumber: '',
           remarks: '',
         },
@@ -155,6 +162,13 @@ export function EditInboundChallanDialog({
         const mat = materials.find((m) => m._id === value);
         if (mat?.baseUnit) {
           updated[index].unit = mat.baseUnit;
+        }
+        if (
+          (updated[index].unitRate === '' || updated[index].unitRate === undefined) &&
+          mat?.standardRate !== undefined &&
+          mat?.standardRate !== null
+        ) {
+          updated[index].unitRate = String(mat.standardRate);
         }
       }
       return { ...prev, lines: updated };
@@ -185,6 +199,11 @@ export function EditInboundChallanDialog({
         toast.error(`Declared quantity on line #${i + 1} must be greater than 0`);
         return;
       }
+      const rate = parseFloat(line.unitRate);
+      if (isNaN(rate) || rate < 0) {
+        toast.error(`Material rate (₹/unit) is required on line #${i + 1}`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -203,6 +222,7 @@ export function EditInboundChallanDialog({
             ? parseFloat(l.receivedQuantity)
             : parseFloat(l.declaredQuantity),
           unit: l.unit || 'KG',
+          unitRate: parseFloat(l.unitRate),
           supplierLotNumber: l.supplierLotNumber?.trim() || undefined,
           remarks: l.remarks?.trim() || undefined,
         })),
@@ -462,7 +482,7 @@ export function EditInboundChallanDialog({
                             />
                           </div>
 
-                          <div className="grid grid-cols-3 gap-2.5">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                             <div className="space-y-1">
                               <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate block">
                                 Declared Qty ({line.unit}) *
@@ -491,6 +511,22 @@ export function EditInboundChallanDialog({
                                 value={line.receivedQuantity}
                                 onChange={(e) => handleLineChange(index, 'receivedQuantity', e.target.value)}
                                 className="h-8 text-xs bg-white border-slate-200"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate block">
+                                Rate (₹/{line.unit || 'Unit'}) *
+                              </Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="e.g. 740.00"
+                                value={line.unitRate}
+                                onChange={(e) => handleLineChange(index, 'unitRate', e.target.value)}
+                                className="h-8 text-xs bg-white border-slate-200 font-mono"
+                                required
                               />
                             </div>
 
@@ -617,6 +653,7 @@ export function EditInboundChallanDialog({
                         <TableHead className="text-xs font-semibold text-slate-700">Material Name & Code</TableHead>
                         <TableHead className="text-right text-xs font-semibold text-slate-700">Declared</TableHead>
                         <TableHead className="text-right text-xs font-semibold text-slate-700">Received</TableHead>
+                        <TableHead className="text-right text-xs font-semibold text-slate-700">Rate (₹)</TableHead>
                         <TableHead className="text-xs font-semibold text-slate-700">Lot / Coil</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -639,6 +676,11 @@ export function EditInboundChallanDialog({
                           </TableCell>
                           <TableCell className="text-right font-bold text-emerald-700 text-xs">
                             {line.receivedQuantity} {line.unit}
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-mono font-semibold text-slate-800">
+                            {line.unitRate !== undefined && line.unitRate !== null
+                              ? Number(line.unitRate).toFixed(2)
+                              : '—'}
                           </TableCell>
                           <TableCell className="text-xs font-mono text-slate-500">
                             {line.supplierLotNumber || '—'}

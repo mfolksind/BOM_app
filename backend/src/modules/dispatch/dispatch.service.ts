@@ -901,6 +901,31 @@ export class DispatchService {
       lines: linesByChallan[ic._id.toString()] || [],
     }));
 
+    // Rates from inbound challans linked to this work order (source of truth for outbound valuation)
+    const woLinkedChallanIds = new Set(
+      [
+        ...(Array.isArray(workOrder?.inboundChallanIds) ? workOrder.inboundChallanIds : []),
+        workOrder?.inboundChallanId,
+      ]
+        .filter(Boolean)
+        .map((id: any) => id.toString()),
+    );
+
+    const rateByMaterialFromWoChallans: Record<string, number> = {};
+    for (const ic of inboundChallans) {
+      const icId = ic._id?.toString();
+      if (!icId || (woLinkedChallanIds.size > 0 && !woLinkedChallanIds.has(icId))) continue;
+      for (const line of ic.lines || []) {
+        const matId =
+          (line.materialId as any)?._id?.toString() || line.materialId?.toString();
+        if (!matId || line.unitRate === undefined || line.unitRate === null) continue;
+        // Keep earliest linked challan's rate (FIFO) if multiple
+        if (rateByMaterialFromWoChallans[matId] === undefined) {
+          rateByMaterialFromWoChallans[matId] = Number(line.unitRate);
+        }
+      }
+    }
+
     // Retrieve BOM if work order has bomVersionId
     let bomItems: any[] = [];
     let bomBatchSize = 1000; // Standard default batchSize in meters (e.g. 1000 meters)
@@ -916,7 +941,10 @@ export class DispatchService {
       }));
     } else if (workOrder?.bomVersionId) {
       const [dbBomItems, dbBomVersion] = await Promise.all([
-        BomItemModel.find({ bomVersionId: workOrder.bomVersionId }).populate('materialId'),
+        BomItemModel.find({ bomVersionId: workOrder.bomVersionId }).populate(
+          'materialId',
+          'code name category hsnCode baseUnit standardRate',
+        ),
         BomVersionModel.findById(workOrder.bomVersionId),
       ]);
       bomItems = dbBomItems;
@@ -977,9 +1005,15 @@ export class DispatchService {
         norm = Number((rawNorm / 1000).toFixed(6));
       }
 
-      const cost = mat?.standardCost || 100;
-
       const mId = mat?._id?.toString() || b.materialId?.toString();
+      const cost =
+        (mId && rateByMaterialFromWoChallans[mId] !== undefined
+          ? rateByMaterialFromWoChallans[mId]
+          : undefined) ??
+        mat?.standardRate ??
+        mat?.standardCost ??
+        100;
+
       if (!materialDemands.some((m) => m.materialId === mId)) {
         materialDemands.push({
           materialId: mId,
@@ -998,7 +1032,7 @@ export class DispatchService {
         const matId = mat?._id?.toString() || line.materialId?.toString();
         const matName = mat?.name || line.materialCode || 'Raw Material';
         const hsn = mat?.hsnCode || '39011090';
-        const cost = line.unitRate || mat?.standardCost || 100;
+        const cost = line.unitRate ?? mat?.standardRate ?? mat?.standardCost ?? 100;
 
         if (matId && !materialDemands.some((m) => m.materialId === matId)) {
           const lower = matName.toLowerCase();
@@ -1058,7 +1092,10 @@ export class DispatchService {
 
           for (const ml of matchingLines) {
             const origQty = ml.receivedQuantity || ml.challanQuantity || 0;
-            const unitRate = ml.unitRate || demand.standardCost || 100;
+            const mat = ml.materialId as any;
+            // Prefer rate captured on the inbound challan line (source of truth for outbound valuation)
+            const unitRate =
+              ml.unitRate ?? mat?.standardRate ?? mat?.standardCost ?? demand.standardCost ?? 100;
             const refDate =
               (ic as any).customerChallanDate || (ic as any).challanDate || (ic as any).createdAt;
             matchingChallanEntries.push({
@@ -1662,7 +1699,11 @@ export class DispatchService {
 
           if (isMatch) {
             const rawRate =
-              line.unitRate || line.rate || (line.materialId as any)?.standardCost || 100;
+              line.unitRate ??
+              line.rate ??
+              (line.materialId as any)?.standardRate ??
+              (line.materialId as any)?.standardCost ??
+              100;
             const hsn = (line.materialId as any)?.hsnCode || '';
             const refNum = ic.customerChallanNumber || ic.challanNumber || 'IC';
             const refDate = formatDate(

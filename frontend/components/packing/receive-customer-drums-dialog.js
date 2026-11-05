@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -254,29 +254,26 @@ export function ReceiveCustomerDrumsDialog({
   const selectedCount = entryMode === 'quick' ? parseInt(numberOfDrums, 10) || 0 : drumRows.length;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-2xl md:max-w-3xl lg:w-[58vw] lg:max-w-[960px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
-      >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[94vw] max-w-4xl max-h-[90vh] sm:max-w-4xl bg-white p-0 flex flex-col overflow-hidden rounded-xl shadow-2xl border border-slate-200">
         <form onSubmit={handleSubmit} className="flex flex-col h-full overflow-hidden">
           {/* Header */}
           <div className="px-6 py-5 border-b border-slate-100 bg-white shrink-0">
-            <SheetHeader className="p-0">
+            <DialogHeader className="p-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
                   <Package className="w-5 h-5" />
                 </div>
                 <div>
-                  <SheetTitle className="text-base font-semibold text-slate-900">
+                  <DialogTitle className="text-base font-semibold text-slate-900">
                     Receive Customer Drums
-                  </SheetTitle>
-                  <SheetDescription className="text-xs text-slate-500">
-                    Log empty drums received from customer under Returnable Gate Pass (RGP)
-                  </SheetDescription>
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500">
+                    Record empty drums received from customer gate entry
+                  </DialogDescription>
                 </div>
               </div>
-            </SheetHeader>
+            </DialogHeader>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -624,7 +621,7 @@ export function ReceiveCustomerDrumsDialog({
             </Button>
           </div>
         </form>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

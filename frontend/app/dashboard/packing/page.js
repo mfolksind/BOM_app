@@ -18,6 +18,7 @@ import { EditDrumDialog } from "@/components/packing/edit-drum-dialog";
 import { ReceiveCustomerDrumsDialog } from "@/components/packing/receive-customer-drums-dialog";
 import { CreatePackingListDialog } from "@/components/packing/create-packing-list-dialog";
 import { PackingListDocumentDialog } from "@/components/packing/packing-list-document-dialog";
+import { MaterialConsumptionSheetDialog } from "@/components/dispatch/material-consumption-sheet-dialog";
 
 import {
     Package,
@@ -71,6 +72,7 @@ export default function PackingPage() {
 
     // Document Previews
     const [previewPackingListId, setPreviewPackingListId] = useState(null);
+    const [previewChallanId, setPreviewChallanId] = useState(null);
     const [selectedPackingCustomer, setSelectedPackingCustomer] = useState(null);
     const [selectedPackingCustomerName, setSelectedPackingCustomerName] = useState("");
 
@@ -131,6 +133,12 @@ export default function PackingPage() {
         fetchDrums();
     }, [fetchPackingLists, fetchDrums]);
 
+    useEffect(() => {
+        if (initialWoId) {
+            setCreatePackingOpen(true);
+        }
+    }, [initialWoId]);
+
     // Options for SearchableSelect
     const customerFilterOptions = useMemo(() => {
         const list = [{ value: "ALL", label: "All Customers" }];
@@ -169,17 +177,58 @@ export default function PackingPage() {
         });
     }, [packingLists, packingSearch, packingCustomerFilter, packingStatusFilter]);
 
-    // Handle Packing List Lifecycle Status Update: DRAFT -> PACKED
+    // Handle Packing List Lifecycle Status Update: DRAFT -> PACKED -> Generate Outbound Challan
     const handlePackList = async (id) => {
         try {
             const res = await apiClient(`/packing-lists/${id}/pack`, { method: "POST" });
             if (res.data) {
-                toast.success("Packing list finalized and drums sealed!");
+                try {
+                    const challanRes = await apiClient(`/packing-lists/${id}/generate-challan`, {
+                        method: "POST",
+                        body: JSON.stringify({}),
+                    });
+                    if (challanRes?.data?._id) {
+                        toast.success(`Packed & Outbound Challan ${challanRes.data.challanNumber} generated!`);
+                        setPreviewChallanId(challanRes.data._id);
+                    } else {
+                        toast.success("Packing list finalized and drums sealed!");
+                    }
+                } catch {
+                    toast.success("Packing list finalized and drums sealed!");
+                }
                 fetchPackingLists();
                 fetchDrums();
             }
         } catch (err) {
             toast.error("Failed to finalize packing list", { description: err.message });
+        }
+    };
+
+    const handleViewOrGenerateOutboundChallan = async (pl) => {
+        const existingChallanId = pl.outboundChallanId?._id || pl.outboundChallanId;
+        if (existingChallanId) {
+            setPreviewChallanId(existingChallanId);
+            return;
+        }
+        try {
+            if (pl.status === "DRAFT") {
+                await apiClient(`/packing-lists/${pl._id}/pack`, { method: "POST" });
+            }
+            const challanRes = await apiClient(`/packing-lists/${pl._id}/generate-challan`, {
+                method: "POST",
+                body: JSON.stringify({
+                    challanNumber: pl.challanNumber,
+                    invoiceNumber: pl.invoiceNumber,
+                }),
+            });
+            if (challanRes?.data?._id) {
+                toast.success(`Outbound Challan ${challanRes.data.challanNumber} generated!`);
+                setPreviewChallanId(challanRes.data._id);
+                fetchPackingLists();
+                fetchDrums();
+            }
+        } catch (err) {
+            toast.error("Failed to generate Outbound Challan", { description: err.message });
         }
     };
 
@@ -512,14 +561,31 @@ export default function PackingPage() {
                                                 <div className="text-[11px] font-mono text-slate-500">
                                                     WO: {pl.workOrderId?.workOrderNumber || pl.workOrderNumber || "—"}
                                                 </div>
+                                                {(pl.inboundChallanNumber || pl.workOrderId?.inboundChallanNumber) && (
+                                                    <div className="text-[10px] font-mono text-indigo-600 mt-0.5">
+                                                        In-Challan: {pl.inboundChallanNumber || pl.workOrderId?.inboundChallanNumber}
+                                                    </div>
+                                                )}
                                             </TableCell>
 
                                             <TableCell className="py-3 font-mono text-xs text-slate-800">
-                                                {pl.sizeDescription || pl.productId?.code || "4CX35 SQMM A2XFY"}
+                                                <div>{pl.sizeDescription || pl.productId?.code || "4CX35 SQMM A2XFY"}</div>
+                                                {(pl.outboundChallanId?.challanNumber || pl.challanNumber) && (
+                                                    <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                                                        Out-Challan: {pl.outboundChallanId?.challanNumber || pl.challanNumber}
+                                                    </div>
+                                                )}
                                             </TableCell>
 
-                                            <TableCell className="py-3 text-right font-mono font-semibold text-xs text-slate-900">
-                                                {pl.totalLengthMeters ? pl.totalLengthMeters.toLocaleString("en-IN") : "0.0"} m
+                                            <TableCell className="py-3 text-right font-mono text-xs">
+                                                <div className="font-semibold text-slate-900">
+                                                    {pl.totalLengthMeters ? pl.totalLengthMeters.toLocaleString("en-IN") : "0.0"} m
+                                                </div>
+                                                {pl.workOrderId?.orderedLengthMeters > 0 && (
+                                                    <div className="text-[10px] text-slate-500 mt-0.5">
+                                                        WO: {(pl.workOrderId.deliveredLengthMeters || pl.totalLengthMeters || 0).toLocaleString()} / {pl.workOrderId.orderedLengthMeters.toLocaleString()} m done
+                                                    </div>
+                                                )}
                                             </TableCell>
                                             <TableCell className="py-3 text-center">
                                                 <Badge
@@ -556,20 +622,30 @@ export default function PackingPage() {
                                                         size="sm"
                                                         variant="outline"
                                                         onClick={() => setPreviewPackingListId(pl._id)}
-                                                        className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-50 border-slate-200"
+                                                        className="h-8 text-xs px-2.5 gap-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-50 border-slate-200 cursor-pointer"
                                                     >
                                                         <FileText className="w-3.5 h-3.5 text-slate-500" />
                                                         Packing List
+                                                    </Button>
+
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleViewOrGenerateOutboundChallan(pl)}
+                                                        className="h-8 text-xs px-2.5 gap-1.5 text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 border-indigo-200 cursor-pointer"
+                                                    >
+                                                        <Truck className="w-3.5 h-3.5 text-indigo-600" />
+                                                        {pl.outboundChallanId ? "Outbound Challan" : "Generate Challan"}
                                                     </Button>
 
                                                     {pl.status === "DRAFT" && (
                                                         <Button
                                                             size="sm"
                                                             onClick={() => handlePackList(pl._id)}
-                                                            className="h-8 text-xs px-2.5 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-medium"
+                                                            className="h-8 text-xs px-2.5 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-medium cursor-pointer"
                                                         >
                                                             <CheckCircle2 className="w-3.5 h-3.5" />
-                                                            Finalize &amp; Seal
+                                                            Pack &amp; Challan
                                                         </Button>
                                                     )}
                                                 </div>
@@ -1045,9 +1121,12 @@ export default function PackingPage() {
                 defaultWorkOrderId={initialWoId}
                 defaultCustomerId={selectedPackingCustomer}
                 defaultCustomerName={selectedPackingCustomerName}
-                onSuccess={() => {
+                onSuccess={(_pl, generatedChallan) => {
                     fetchPackingLists();
                     fetchDrums();
+                    if (generatedChallan?._id) {
+                        setPreviewChallanId(generatedChallan._id);
+                    }
                 }}
             />
 
@@ -1078,6 +1157,15 @@ export default function PackingPage() {
                     packingListId={previewPackingListId}
                     open={Boolean(previewPackingListId)}
                     onOpenChange={(val) => !val && setPreviewPackingListId(null)}
+                />
+            )}
+
+            {/* Outbound Delivery Challan & Material Consumption Sheet Preview */}
+            {previewChallanId && (
+                <MaterialConsumptionSheetDialog
+                    challanId={previewChallanId}
+                    open={Boolean(previewChallanId)}
+                    onOpenChange={(val) => !val && setPreviewChallanId(null)}
                 />
             )}
         </div>

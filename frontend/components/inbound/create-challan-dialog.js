@@ -75,6 +75,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                 declaredQuantity: "",
                 receivedQuantity: "",
                 unit: "KG",
+                unitRate: "",
                 supplierLotNumber: "",
                 remarks: "",
             },
@@ -103,6 +104,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                     declaredQuantity: "",
                     receivedQuantity: "",
                     unit: "KG",
+                    unitRate: "",
                     supplierLotNumber: "",
                     remarks: "",
                 },
@@ -129,6 +131,14 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                 const selectedMat = (localMaterials || []).find((m) => m._id === value);
                 if (selectedMat?.baseUnit) {
                     updated[index].unit = selectedMat.baseUnit;
+                }
+                // Prefill catalog rate only if user has not entered a rate yet
+                if (
+                    (updated[index].unitRate === "" || updated[index].unitRate === undefined) &&
+                    selectedMat?.standardRate !== undefined &&
+                    selectedMat?.standardRate !== null
+                ) {
+                    updated[index].unitRate = String(selectedMat.standardRate);
                 }
             }
             return { ...prev, lines: updated };
@@ -170,6 +180,11 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                     return;
                 }
             }
+            const rate = parseFloat(line.unitRate);
+            if (isNaN(rate) || rate < 0) {
+                toast.error(`Material rate (₹/unit) is required on line #${i + 1}`);
+                return;
+            }
         }
 
         setLoading(true);
@@ -189,6 +204,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                     declaredQuantity: parseFloat(l.declaredQuantity),
                     receivedQuantity: l.receivedQuantity ? parseFloat(l.receivedQuantity) : parseFloat(l.declaredQuantity),
                     unit: l.unit || "KG",
+                    unitRate: parseFloat(l.unitRate),
                     supplierLotNumber: l.supplierLotNumber.trim() || undefined,
                     remarks: l.remarks.trim() || undefined,
                 })),
@@ -227,6 +243,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                             declaredQuantity: "",
                             receivedQuantity: "",
                             unit: "KG",
+                            unitRate: "",
                             supplierLotNumber: "",
                             remarks: "",
                         },
@@ -503,7 +520,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                                 <div>
                                     <h4 className="font-semibold text-foreground text-sm">Challan Line Items ({formData.lines.length})</h4>
                                     <p className="text-xs text-muted-foreground">
-                                        List incoming raw materials and declared vs received quantities
+                                        List incoming materials, quantities, and rates — these rates flow to outbound consumption for linked work orders
                                     </p>
                                 </div>
                                 <Button
@@ -557,7 +574,7 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                                                     />
                                                 </div>
 
-                                                <div className="grid grid-cols-3 gap-2.5">
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                                                     <div className="space-y-1">
                                                         <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider truncate block">
                                                             Declared Qty *
@@ -586,6 +603,22 @@ export function CreateInboundChallanDialog({ open, onOpenChange, customers = [],
                                                             value={line.receivedQuantity}
                                                             onChange={(e) => handleLineChange(index, "receivedQuantity", e.target.value)}
                                                             className="h-8 text-xs bg-background"
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-1">
+                                                        <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider truncate block">
+                                                            Rate (₹/{line.unit || "Unit"}) *
+                                                        </Label>
+                                                        <Input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            placeholder="e.g. 740.00"
+                                                            value={line.unitRate}
+                                                            onChange={(e) => handleLineChange(index, "unitRate", e.target.value)}
+                                                            className="h-8 text-xs bg-background font-mono"
+                                                            required
                                                         />
                                                     </div>
 

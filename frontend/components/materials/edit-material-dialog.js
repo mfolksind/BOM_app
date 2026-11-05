@@ -271,7 +271,7 @@ export function EditMaterialDialog({
 
               <div className="space-y-1.5">
                 <Label htmlFor="editStdRate" className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Standard Rate (₹ / Unit)
+                  Catalog Rate (₹ / Unit) — optional
                 </Label>
                 <Input
                   id="editStdRate"
@@ -280,9 +280,12 @@ export function EditMaterialDialog({
                   step="0.01"
                   value={formData.standardRate}
                   onChange={(e) => handleChange('standardRate', e.target.value)}
-                  placeholder="e.g. 740.00"
+                  placeholder="Optional fallback only"
                   className="h-10 font-mono text-sm"
                 />
+                <p className="text-[11px] text-slate-500">
+                  Actual billing rate is set on each inbound challan line and used on outbound consumption.
+                </p>
               </div>
 
               <div className="space-y-1.5">

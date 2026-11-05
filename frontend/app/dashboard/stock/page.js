@@ -647,8 +647,8 @@ export default function StockDashboardPage() {
       </div>
 
       {/* Multi-Filter Bar */}
-      <Card className="border-slate-200 bg-white shadow-2xs">
-        <CardContent className="p-4 space-y-3">
+      <Card className="border-slate-200 bg-white shadow-2xs overflow-visible relative z-30">
+        <CardContent className="p-4 space-y-3 overflow-visible">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
               Inventory &amp; Challan Filters

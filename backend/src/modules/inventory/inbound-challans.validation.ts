@@ -13,6 +13,7 @@ export const inboundChallanLineInputSchema = z.object({
   declaredQuantity: z.number().positive('Declared quantity must be greater than 0'),
   receivedQuantity: z.number().positive('Received quantity must be greater than 0'),
   unit: z.string().trim().min(1, 'Unit is required'),
+  unitRate: z.number().min(0, 'Unit rate cannot be negative').optional(),
   supplierLotNumber: z.string().trim().optional(),
   remarks: z.string().trim().optional(),
 });

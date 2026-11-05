@@ -8,6 +8,8 @@ export interface IInboundChallanLine extends Document {
   declaredQuantity: number;
   receivedQuantity: number;
   unit: string;
+  /** Rate (₹/unit) captured at inbound receipt — used on outbound consumption for WOs from this challan */
+  unitRate?: number;
   lotId?: mongoose.Types.ObjectId;
   supplierLotNumber?: string;
   qualityStatus: InboundLineQcStatus;
@@ -42,6 +44,10 @@ const inboundChallanLineSchema = new Schema<IInboundChallanLine>(
       type: String,
       required: true,
       trim: true,
+    },
+    unitRate: {
+      type: Number,
+      min: [0, 'Unit rate cannot be negative'],
     },
     lotId: {
       type: Schema.Types.ObjectId,

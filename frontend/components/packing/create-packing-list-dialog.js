@@ -5,13 +5,6 @@ import { apiClient } from '@/lib/api';
 import { toast } from 'sonner';
 
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet';
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -44,19 +37,14 @@ import {
   Package,
   Plus,
   Trash2,
-  Layers,
   FileText,
   Calculator,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
   Send,
   Copy,
   Clock,
-  Building2,
-  Printer,
-  ChevronRight,
 } from 'lucide-react';
 
 export function CreatePackingListDialog({
@@ -79,20 +67,21 @@ export function CreatePackingListDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
 
-  // Form Header State (Image 1 Header)
+  // Form Header State
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [challanNumber, setChallanNumber] = useState('');
   const [packingNumber, setPackingNumber] = useState('');
   const [sizeDescription, setSizeDescription] = useState('');
   const [packingDate, setPackingDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Drum Capacity & Auto-Allocation State
+  // Manual "Completed Quantity to Pack Now (Meters)" & Drum Capacity
+  const [completedLengthToPack, setCompletedLengthToPack] = useState(0);
   const [drumCapacityMeters, setDrumCapacityMeters] = useState(500);
 
   // Drum Shortage Modal State
   const [requestDrumsModalOpen, setRequestDrumsModalOpen] = useState(false);
 
-  // Drum lines state (Image 1 Table)
+  // Drum lines state
   const [lines, setLines] = useState([
     {
       drumId: '',
@@ -116,17 +105,35 @@ export function CreatePackingListDialog({
     return '';
   };
 
-  // Set of work order IDs that are already utilized in a packing list
-  const packedWorkOrderIds = useMemo(() => {
-    const set = new Set();
+  // Meters already packed per work order (non-cancelled packing lists) — allows partial / multiple outbound challans
+  const packedMetersByWorkOrderId = useMemo(() => {
+    const map = {};
     (existingPackingLists || []).forEach((pl) => {
+      if (pl.status === 'CANCELLED') return;
       const woId = pl.workOrderId?._id || pl.workOrderId;
-      if (woId && pl.status !== 'CANCELLED') {
-        set.add(String(woId));
-      }
+      if (!woId) return;
+      const key = String(woId);
+      map[key] = (map[key] || 0) + (Number(pl.totalLengthMeters) || 0);
     });
-    return set;
+    return map;
   }, [existingPackingLists]);
+
+  const getWorkOrderOrderedMeters = (wo) =>
+    Number(wo?.orderedLengthMeters || wo?.plannedLengthMeters || wo?.quantity || 0) || 0;
+
+  const getWorkOrderAlreadyPackedMeters = (wo) => {
+    if (!wo) return 0;
+    const fromPlMap = packedMetersByWorkOrderId[String(wo._id)];
+    if (typeof fromPlMap === 'number') return fromPlMap;
+    return Number(wo.packedLengthMeters || wo.deliveredLengthMeters || 0) || 0;
+  };
+
+  const getWorkOrderRemainingMeters = (wo) => {
+    if (!wo) return 0;
+    const ordered = getWorkOrderOrderedMeters(wo);
+    const already = getWorkOrderAlreadyPackedMeters(wo);
+    return Math.max(0, Number((ordered - already).toFixed(2)));
+  };
 
   // Active pool of drums (either customer-filtered or all yard drums)
   const activeDrumsPool = useMemo(() => {
@@ -155,18 +162,15 @@ export function CreatePackingListDialog({
   const isRgpExhausted =
     selectedRgp !== 'ALL' && drumsForRgp.length > 0 && remainingDrumsForRgp.length === 0;
 
-  // Filtered work orders: ONLY show COMPLETED work orders that haven't been utilized yet to make a packing list
+  // All non-cancelled work orders that still have remaining meters to pack / dispatch (partial shipments allowed)
   const filteredWorkOrders = useMemo(() => {
     if (!Array.isArray(workOrders)) return [];
     return workOrders.filter((wo) => {
-      // Must be COMPLETED (case-insensitive & trimmed)
       const st = String(wo.status || '').trim().toUpperCase();
-      if (st !== 'COMPLETED') return false;
+      if (st === 'CANCELLED') return false;
 
-      // Cannot be already utilized to make an active packing list
-      if (packedWorkOrderIds.has(String(wo._id))) return false;
+      if (getWorkOrderRemainingMeters(wo) <= 0) return false;
 
-      // Customer filter
       if (selectedCustomerId && selectedCustomerId !== 'ALL') {
         const cid = getCustId(wo.customerId);
         if (String(cid) !== String(selectedCustomerId)) return false;
@@ -174,14 +178,14 @@ export function CreatePackingListDialog({
 
       return true;
     });
-  }, [workOrders, selectedCustomerId, packedWorkOrderIds]);
+  }, [workOrders, selectedCustomerId, packedMetersByWorkOrderId]);
 
-  // Count of total completed work orders before packing list exclusion
-  const completedWorkOrdersCount = useMemo(() => {
+  // Count of total non-cancelled work orders before packing list exclusion
+  const activeWorkOrdersCount = useMemo(() => {
     if (!Array.isArray(workOrders)) return 0;
     return workOrders.filter((wo) => {
       const st = String(wo.status || '').trim().toUpperCase();
-      if (st !== 'COMPLETED') return false;
+      if (st === 'CANCELLED') return false;
       if (selectedCustomerId && selectedCustomerId !== 'ALL') {
         const cid = getCustId(wo.customerId);
         if (String(cid) !== String(selectedCustomerId)) return false;
@@ -213,13 +217,106 @@ export function CreatePackingListDialog({
   }, [customers, allYardDrums]);
 
   const workOrderOptions = useMemo(() => {
-    return (filteredWorkOrders || []).map((wo) => ({
-      value: String(wo._id),
-      label: wo.workOrderNumber,
-      code: wo.status ? `[${wo.status}]` : (wo.productId?.code || ''),
-      subLabel: `${wo.customerId?.name || 'Customer'} • ${(wo.orderedLengthMeters || wo.plannedLengthMeters || 0).toLocaleString()} m`,
-    }));
-  }, [filteredWorkOrders]);
+    return (filteredWorkOrders || []).map((wo) => {
+      const ordered = getWorkOrderOrderedMeters(wo);
+      const remaining = getWorkOrderRemainingMeters(wo);
+      const already = getWorkOrderAlreadyPackedMeters(wo);
+      const remLabel =
+        already > 0
+          ? `${remaining.toLocaleString()} m left (Done: ${already.toLocaleString()} / ${ordered.toLocaleString()} m)`
+          : `${ordered.toLocaleString()} m total`;
+      const challanInfo = wo.inboundChallanNumber ? ` • In-Challan: ${wo.inboundChallanNumber}` : '';
+      return {
+        value: String(wo._id),
+        label: wo.workOrderNumber,
+        code: wo.status ? `[${wo.status}]` : (wo.productId?.code || ''),
+        subLabel: `${wo.customerId?.name || 'Customer'} • ${remLabel}${challanInfo}`,
+      };
+    });
+  }, [filteredWorkOrders, packedMetersByWorkOrderId]);
+
+  // Helper to allocate a given target length across available drums
+  const allocateLengthAcrossDrums = (targetLen, capVal, emptyDrumsList, woObj) => {
+    const numericTarget = Math.max(0, Number(targetLen) || 0);
+    const cap = Number(capVal) > 0 ? Number(capVal) : 500;
+    const neededCount = numericTarget > 0 ? Math.ceil(numericTarget / cap) : 1;
+    const drumsSource = Array.isArray(emptyDrumsList) ? emptyDrumsList : activeDrumsPool;
+
+    if (drumsSource.length > 0) {
+      const drumsToAllocate = drumsSource.slice(0, Math.max(1, neededCount));
+      let remaining = numericTarget > 0 ? numericTarget : cap;
+
+      const generated = drumsToAllocate.map((drum, idx) => {
+        const sizeStr =
+          drum.drumSize ||
+          drum.sizeDescription ||
+          (drum.flangeDiameterMm && drum.barrelDiameterMm && drum.traverseWidthMm
+            ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
+            : '44X16X24');
+
+        const isLastAllocated = idx === drumsToAllocate.length - 1;
+        const cut =
+          numericTarget > 0
+            ? isLastAllocated && drumsToAllocate.length < neededCount
+              ? Math.min(remaining, cap)
+              : Math.min(remaining, cap)
+            : cap;
+        remaining = Math.max(0, Number((remaining - cut).toFixed(2)));
+
+        return {
+          drumId: drum._id,
+          drumNumber: drum.drumNumber,
+          lengthBottom: 0,
+          lengthTop: Number(cut.toFixed(2)),
+          lengthTotal: Number(cut.toFixed(2)),
+          drumSize: sizeStr,
+          refRgpNumber: drum.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : ''),
+          drumType: drum.drumType || 'WOODEN',
+          remarks: drum.remarks || 'STD.LENGTH',
+        };
+      });
+
+      // If more drums are needed than available in yard, add placeholder rows for remaining length
+      let extraIdx = generated.length;
+      while (remaining > 0) {
+        const cut = Math.min(remaining, cap);
+        remaining = Math.max(0, Number((remaining - cut).toFixed(2)));
+        extraIdx += 1;
+        generated.push({
+          drumId: '',
+          drumNumber: `MF/${String(extraIdx).padStart(2, '0')}`,
+          lengthBottom: 0,
+          lengthTop: Number(cut.toFixed(2)),
+          lengthTotal: Number(cut.toFixed(2)),
+          drumSize: '44X16X24',
+          refRgpNumber: selectedRgp !== 'ALL' ? selectedRgp : woObj?.customerPoNumber || '',
+          drumType: 'WOODEN',
+          remarks: 'STD.LENGTH',
+        });
+      }
+
+      setLines(generated);
+    } else {
+      let remaining = numericTarget > 0 ? numericTarget : cap;
+      const generated = [];
+      for (let i = 0; i < neededCount; i++) {
+        const cut = numericTarget > 0 ? Math.min(remaining, cap) : cap;
+        remaining = Math.max(0, Number((remaining - cut).toFixed(2)));
+        generated.push({
+          drumId: '',
+          drumNumber: `MF/${String(i + 1).padStart(2, '0')}`,
+          lengthBottom: 0,
+          lengthTop: Number(cut.toFixed(2)),
+          lengthTotal: Number(cut.toFixed(2)),
+          drumSize: '44X16X24',
+          refRgpNumber: selectedRgp !== 'ALL' ? selectedRgp : woObj?.customerPoNumber || '',
+          drumType: 'WOODEN',
+          remarks: 'STD.LENGTH',
+        });
+      }
+      setLines(generated);
+    }
+  };
 
   // Load masters & yard drums when dialog opens
   const loadInitialData = async () => {
@@ -259,17 +356,28 @@ export function CreatePackingListDialog({
       const targetCust = defaultCustomerId || 'ALL';
       setSelectedCustomerId(targetCust);
 
-      const packedSet = new Set(
-        plList.filter((p) => p.status !== 'CANCELLED').map((p) => String(p.workOrderId?._id || p.workOrderId))
-      );
-      const eligibleWoList = woList.filter(
-        (w) => w.status === 'COMPLETED' && !packedSet.has(String(w._id))
-      );
+      // Calculate packed meters per WO from plList
+      const packedMap = {};
+      plList.forEach((pl) => {
+        if (pl.status === 'CANCELLED') return;
+        const wId = String(pl.workOrderId?._id || pl.workOrderId || '');
+        if (wId) packedMap[wId] = (packedMap[wId] || 0) + (Number(pl.totalLengthMeters) || 0);
+      });
+
+      const eligibleWoList = woList.filter((w) => {
+        const st = String(w.status || '').trim().toUpperCase();
+        if (st === 'CANCELLED') return false;
+        const ordered = Number(w.orderedLengthMeters || w.plannedLengthMeters || w.quantity || 0) || 0;
+        const already = packedMap[String(w._id)] ?? (Number(w.packedLengthMeters || w.deliveredLengthMeters || 0) || 0);
+        return ordered - already > 0;
+      });
 
       // If defaultWorkOrderId is passed, select it
       let initialWo = null;
       if (defaultWorkOrderId) {
-        initialWo = eligibleWoList.find((w) => String(w._id) === String(defaultWorkOrderId));
+        initialWo =
+          eligibleWoList.find((w) => String(w._id) === String(defaultWorkOrderId)) ||
+          woList.find((w) => String(w._id) === String(defaultWorkOrderId));
       } else if (targetCust !== 'ALL') {
         initialWo = eligibleWoList.find((w) => String(getCustId(w.customerId)) === String(targetCust));
       } else if (eligibleWoList.length > 0) {
@@ -277,9 +385,8 @@ export function CreatePackingListDialog({
       }
 
       if (initialWo) {
-        handleSelectWorkOrderWithDrums(initialWo, emptyYardDrums);
+        handleSelectWorkOrderWithDrums(initialWo, emptyYardDrums, packedMap);
       } else {
-        // Filter empty drums for this customer
         const custDrums =
           targetCust !== 'ALL'
             ? emptyYardDrums.filter(
@@ -303,11 +410,10 @@ export function CreatePackingListDialog({
   }, [open, defaultWorkOrderId, defaultCustomerId]);
 
   // When work order is selected, bind metadata & allocate customer empty drums
-  const handleSelectWorkOrderWithDrums = (wo, yardDrumsPool = allYardDrums) => {
+  const handleSelectWorkOrderWithDrums = (wo, yardDrumsPool = allYardDrums, customPackedMap = null) => {
     if (!wo) return;
     setSelectedWorkOrder(wo);
 
-    // Pre-fill size description and numbers
     if (wo.productId?.name || wo.productId?.code) {
       setSizeDescription(wo.productId.code || wo.productId.name);
     }
@@ -321,70 +427,25 @@ export function CreatePackingListDialog({
       setSelectedCustomerId(custId);
     }
 
-    // Filter available drums for this customer
     const pool = Array.isArray(yardDrumsPool) && yardDrumsPool.length > 0 ? yardDrumsPool : allYardDrums;
     const custDrums = custId
       ? pool.filter((d) => String(getCustId(d.customerId)) === String(custId))
       : pool;
 
-    // If customer-specific drums exist, prioritize them. If 0 found, fall back to all yard drums so user is never blocked.
     const emptyDrums = custDrums.length > 0 ? custDrums : pool;
     setAvailableDrums(emptyDrums);
 
-    const targetLength =
-      wo.orderedLengthMeters ||
-      wo.plannedLengthMeters ||
-      wo.quantity ||
-      0;
-    const cap = Number(drumCapacityMeters) > 0 ? Number(drumCapacityMeters) : 500;
-    const neededCount = targetLength > 0 ? Math.ceil(targetLength / cap) : 2;
+    const ordered = getWorkOrderOrderedMeters(wo);
+    const already = customPackedMap
+      ? customPackedMap[String(wo._id)] || 0
+      : getWorkOrderAlreadyPackedMeters(wo);
+    const remainingLength = Math.max(0, Number((ordered - already).toFixed(2)));
+    const recordedDone = Number(wo.doneLengthMeters ?? wo.deliveredLengthMeters ?? 0);
+    const unpackedDone = Math.max(0, Number((recordedDone - already).toFixed(2)));
+    const initialPackQty = unpackedDone > 0 && unpackedDone <= remainingLength ? unpackedDone : remainingLength;
 
-    // Auto-populate needed rows from available drums
-    if (emptyDrums.length > 0) {
-      const drumsToAllocate = emptyDrums.slice(0, Math.max(1, neededCount));
-      let remaining = targetLength || cap * drumsToAllocate.length;
-
-      setLines(
-        drumsToAllocate.map((drum) => {
-          const sizeStr =
-            drum.drumSize ||
-            drum.sizeDescription ||
-            (drum.flangeDiameterMm && drum.barrelDiameterMm && drum.traverseWidthMm
-              ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
-              : '44X16X24');
-
-          const cut = targetLength > 0 ? Math.min(remaining, cap) : cap;
-          remaining = Math.max(0, remaining - cut);
-
-          return {
-            drumId: drum._id,
-            drumNumber: drum.drumNumber,
-            lengthBottom: 0,
-            lengthTop: Number(cut.toFixed(2)) || cap,
-            lengthTotal: Number(cut.toFixed(2)) || cap,
-            drumSize: sizeStr,
-            refRgpNumber: drum.refRgpNumber || '',
-            drumType: drum.drumType || 'WOODEN',
-            remarks: drum.remarks || 'STD.LENGTH',
-          };
-        }),
-      );
-    } else {
-      // Yard has 0 empty drums for this selection
-      setLines([
-        {
-          drumId: '',
-          drumNumber: 'MF/01',
-          lengthBottom: 0,
-          lengthTop: cap,
-          lengthTotal: cap,
-          drumSize: '44X16X24',
-          refRgpNumber: '',
-          drumType: 'WOODEN',
-          remarks: 'STD.LENGTH',
-        },
-      ]);
-    }
+    setCompletedLengthToPack(initialPackQty);
+    allocateLengthAcrossDrums(initialPackQty, drumCapacityMeters, emptyDrums, wo);
   };
 
   // Handle Customer Filter change
@@ -396,46 +457,69 @@ export function CreatePackingListDialog({
         : allYardDrums;
     setAvailableDrums(custDrums.length > 0 ? custDrums : allYardDrums);
 
-    // If selected work order doesn't match new customer, pick first matching work order
     if (custId && custId !== 'ALL') {
-      const matchingWos = workOrders.filter(
-        (w) => String(getCustId(w.customerId)) === String(custId),
-      );
+      const matchingWos = workOrders.filter((w) => {
+        if (String(getCustId(w.customerId)) !== String(custId)) return false;
+        const st = String(w.status || '').trim().toUpperCase();
+        if (st === 'CANCELLED') return false;
+        return getWorkOrderRemainingMeters(w) > 0;
+      });
       if (matchingWos.length > 0) {
         handleSelectWorkOrderWithDrums(matchingWos[0], allYardDrums);
       }
     }
   };
 
-  // Target PO / Work Order planned length
-  const targetPoLength =
-    selectedWorkOrder?.orderedLengthMeters ||
-    selectedWorkOrder?.plannedLengthMeters ||
-    selectedWorkOrder?.quantity ||
-    0;
+  // Full WO order length vs remaining length still available to pack / ship
+  const orderedPoLength = selectedWorkOrder ? getWorkOrderOrderedMeters(selectedWorkOrder) : 0;
+  const alreadyPackedOnWo = selectedWorkOrder ? getWorkOrderAlreadyPackedMeters(selectedWorkOrder) : 0;
+  const targetPoLength = selectedWorkOrder ? getWorkOrderRemainingMeters(selectedWorkOrder) : 0;
+
+  const totalPackedLength = lines.reduce(
+    (acc, curr) => acc + (Number(curr.lengthTotal) || 0),
+    0,
+  );
+  const remainingAfterThisPack = Math.max(
+    0,
+    Number((targetPoLength - totalPackedLength).toFixed(2)),
+  );
+  const lengthDifference = Number((totalPackedLength - targetPoLength).toFixed(1));
 
   const capacity = Number(drumCapacityMeters) > 0 ? Number(drumCapacityMeters) : 500;
-  const estimatedDrumsNeeded = targetPoLength > 0 ? Math.ceil(targetPoLength / capacity) : 1;
+  const effectiveBatchLength = Number(completedLengthToPack) > 0 ? Number(completedLengthToPack) : totalPackedLength;
+  const estimatedDrumsNeeded = effectiveBatchLength > 0 ? Math.ceil(effectiveBatchLength / capacity) : 1;
   const availableInYardCount = drumsForRgp.length;
-  const isDrumShortage = targetPoLength > 0 && availableInYardCount < estimatedDrumsNeeded;
+  const isDrumShortage = effectiveBatchLength > 0 && availableInYardCount < estimatedDrumsNeeded;
   const shortageDrumsCount = isDrumShortage ? estimatedDrumsNeeded - availableInYardCount : 0;
 
-  // Auto-Allocate Customer Drums based on PO length & drum capacity
+  // Handle manual typing of Completed Quantity to Pack Now (Meters)
+  const handleCompletedLengthInputChange = (val) => {
+    setCompletedLengthToPack(val);
+    const numVal = parseFloat(val);
+    if (!isNaN(numVal) && numVal > 0) {
+      const drumsPool = selectedRgp === 'ALL' ? activeDrumsPool : drumsForRgp;
+      allocateLengthAcrossDrums(numVal, drumCapacityMeters, drumsPool, selectedWorkOrder);
+    }
+  };
+
+  // Auto-Allocate Customer Drums based on Completed Quantity to Pack Now & drum capacity
   const handleAutoAllocateDrums = (useSampleImageSplit = false) => {
     if (!selectedWorkOrder) {
       toast.error('Please select a Work Order first');
       return;
     }
 
-    const targetLength = targetPoLength || 1000;
+    const targetLength =
+      Number(completedLengthToPack) > 0
+        ? Number(completedLengthToPack)
+        : targetPoLength || 1000;
     const cap = capacity;
     const neededCount = Math.ceil(targetLength / cap);
 
-    // Determine length splits across drums
     let splits = [];
     if (useSampleImageSplit || (targetLength === 1997 && neededCount === 4)) {
-      // Exact Image 1 scanned sample: 495, 495, 499, 508 = 1997m
       splits = [495, 495, 499, 508];
+      setCompletedLengthToPack(1997);
     } else {
       let remaining = targetLength;
       for (let i = 0; i < neededCount; i++) {
@@ -452,7 +536,7 @@ export function CreatePackingListDialog({
       );
     } else if (drumsPool.length < splits.length) {
       toast.warning(
-        `Selection has ${drumsPool.length} empty drums in yard, but ${splits.length} are required. Allocated all available drums. Save as Draft to ask customer for ${splits.length - drumsPool.length} more drums.`,
+        `Selection has ${drumsPool.length} empty drums in yard, but ${splits.length} are required. Allocated all available drums.`,
       );
     }
 
@@ -482,7 +566,7 @@ export function CreatePackingListDialog({
 
     setLines(newLines);
     toast.success(
-      `Auto-allocated ${newLines.length} drums for total length ${targetLength.toLocaleString()} m!`,
+      `Split ${targetLength.toLocaleString()} m across ${newLines.length} drum(s)!`,
     );
   };
 
@@ -499,20 +583,25 @@ export function CreatePackingListDialog({
         ? `${drum.flangeDiameterMm}X${drum.barrelDiameterMm}X${drum.traverseWidthMm}`
         : '44X16X24');
 
-    setLines((prev) => [
-      ...prev,
-      {
-        drumId: drum?._id || '',
-        drumNumber: drum?.drumNumber || `MF/${String(nextIdx + 1).padStart(2, '0')}`,
-        lengthBottom: 0,
-        lengthTop: capacity,
-        lengthTotal: capacity,
-        drumSize: sizeStr,
-        refRgpNumber: drum?.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : ''),
-        drumType: drum?.drumType || 'WOODEN',
-        remarks: 'STD.LENGTH',
-      },
-    ]);
+    setLines((prev) => {
+      const updated = [
+        ...prev,
+        {
+          drumId: drum?._id || '',
+          drumNumber: drum?.drumNumber || `MF/${String(nextIdx + 1).padStart(2, '0')}`,
+          lengthBottom: 0,
+          lengthTop: capacity,
+          lengthTotal: capacity,
+          drumSize: sizeStr,
+          refRgpNumber: drum?.refRgpNumber || (selectedRgp !== 'ALL' ? selectedRgp : ''),
+          drumType: drum?.drumType || 'WOODEN',
+          remarks: 'STD.LENGTH',
+        },
+      ];
+      const newSum = updated.reduce((s, r) => s + (Number(r.lengthTotal) || 0), 0);
+      setCompletedLengthToPack(Number(newSum.toFixed(2)));
+      return updated;
+    });
   };
 
   const handleRemoveLine = (index) => {
@@ -520,7 +609,12 @@ export function CreatePackingListDialog({
       toast.error('Packing list must contain at least one drum line');
       return;
     }
-    setLines((prev) => prev.filter((_, i) => i !== index));
+    setLines((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      const newSum = updated.reduce((s, r) => s + (Number(r.lengthTotal) || 0), 0);
+      setCompletedLengthToPack(Number(newSum.toFixed(2)));
+      return updated;
+    });
   };
 
   const handleDrumSelect = (index, drumId) => {
@@ -561,15 +655,13 @@ export function CreatePackingListDialog({
       }
 
       updated[index] = cur;
+      if (field === 'lengthBottom' || field === 'lengthTop') {
+        const newSum = updated.reduce((s, r) => s + (Number(r.lengthTotal) || 0), 0);
+        setCompletedLengthToPack(Number(newSum.toFixed(2)));
+      }
       return updated;
     });
   };
-
-  const totalPackedLength = lines.reduce(
-    (acc, curr) => acc + (Number(curr.lengthTotal) || 0),
-    0,
-  );
-  const lengthDifference = Number((totalPackedLength - targetPoLength).toFixed(1));
 
   const handleSubmit = async (finalizeImmediately = false, customRemarks = null) => {
     if (!selectedWorkOrder) {
@@ -583,18 +675,31 @@ export function CreatePackingListDialog({
       return;
     }
 
-    // If finalizing immediately but work order length is more than available packed length, warn user
-    if (finalizeImmediately && isDrumShortage) {
-      toast.warning(
-        `Work order has a shortage of ${shortageDrumsCount} drums. We recommend saving as Draft and asking more drums from ${selectedWorkOrder.customerId?.name || 'customer'}.`,
+    const thisShipmentLength = lines.reduce(
+      (acc, curr) => acc + (Number(curr.lengthTotal) || 0),
+      0,
+    );
+    if (thisShipmentLength <= 0) {
+      toast.error('Total packed length must be greater than 0 meters');
+      return;
+    }
+
+    if (targetPoLength > 0 && thisShipmentLength > targetPoLength + 0.01) {
+      toast.error(
+        `This packing list (${thisShipmentLength.toLocaleString()} m) exceeds remaining work order length (${targetPoLength.toLocaleString()} m). Reduce length for this batch.`,
       );
+      return;
     }
 
     setIsSubmitting(true);
     try {
+      const inboundRef =
+        selectedWorkOrder.inboundChallanNumber ||
+        selectedWorkOrder.inboundChallanNumbers?.join(', ') ||
+        '';
       const defaultRemarks = isDrumShortage
         ? `[DRAFT - DRUM SHORTAGE] Requires ${estimatedDrumsNeeded} drums, only ${availableInYardCount} available in yard. Pending ${shortageDrumsCount} drums from ${selectedWorkOrder.customerId?.name || 'customer'}.`
-        : 'Standard cable packing list';
+        : `Packed ${thisShipmentLength}m (Done: ${alreadyPackedOnWo + thisShipmentLength}m / ${orderedPoLength}m, Left: ${Math.max(0, targetPoLength - thisShipmentLength)}m)${inboundRef ? ` • Inbound Challan: ${inboundRef}` : ''}`;
 
       const payload = {
         workOrderId: selectedWorkOrder._id,
@@ -633,19 +738,34 @@ export function CreatePackingListDialog({
 
       if (res.data) {
         const packingListId = res.data._id;
-        toast.success(
-          `Packing list ${res.data.packingListNumber} saved as ${finalizeImmediately ? 'PACKED' : 'DRAFT'}!`,
-        );
+        let generatedChallan = null;
 
-        // If requested to finalize immediately (Step 1 complete, drums transition to PACKED)
         if (finalizeImmediately) {
           await apiClient(`/packing-lists/${packingListId}/pack`, {
             method: 'POST',
           });
-          toast.success('Drums sealed and transitioned to PACKED status! Yard stock reduced.');
+          try {
+            const challanRes = await apiClient(`/packing-lists/${packingListId}/generate-challan`, {
+              method: 'POST',
+              body: JSON.stringify({
+                challanNumber,
+                invoiceNumber,
+                remarks: customRemarks || defaultRemarks,
+              }),
+            });
+            generatedChallan = challanRes?.data || null;
+            toast.success(
+              `Packed ${thisShipmentLength.toLocaleString()} m & generated Outbound Challan ${generatedChallan?.challanNumber || challanNumber}!`,
+            );
+          } catch (challanErr) {
+            console.warn('Auto challan generation warning:', challanErr);
+            toast.success(`Packing list ${res.data.packingListNumber} packed! You can generate the Outbound Challan from the table.`);
+          }
+        } else {
+          toast.success(`Packing list ${res.data.packingListNumber} saved as DRAFT!`);
         }
 
-        if (onSuccess) onSuccess(res.data);
+        if (onSuccess) onSuccess(res.data, generatedChallan);
         onOpenChange(false);
       }
     } catch (err) {
@@ -660,17 +780,26 @@ export function CreatePackingListDialog({
   // Drum Request Letter generator for customer
   const customerName = selectedWorkOrder?.customerId?.name || defaultCustomerName || 'Customer';
   const woNumber = selectedWorkOrder?.workOrderNumber || 'WO-PENDING';
+  const inboundChallanDisplay =
+    selectedWorkOrder?.inboundChallanNumber ||
+    (Array.isArray(selectedWorkOrder?.inboundChallanNumbers) && selectedWorkOrder.inboundChallanNumbers.length > 0
+      ? selectedWorkOrder.inboundChallanNumbers.join(', ')
+      : 'Customer Stock');
+
   const generatedRequestMessage = `Subject: Urgent Requirement: Returnable Cable Drums for WO #${woNumber} - ${customerName}
 
 Dear ${customerName} Logistics Team,
 
 Greetings from MFolks Manufacturing & Cable Works.
 
-We have manufactured the cable as per your Work Order #${woNumber} (${targetPoLength.toLocaleString()} m of ${sizeDescription || 'Cable'}).
+We have manufactured the cable as per your Work Order #${woNumber} (${orderedPoLength.toLocaleString()} m of ${sizeDescription || 'Cable'}).
 
 Current Yard & Packaging Status:
-- Total Order Length: ${targetPoLength.toLocaleString()} meters
-- Drums Required: ${estimatedDrumsNeeded} drums (Standard capacity ~${capacity}m / drum)
+- Total Order Length: ${orderedPoLength.toLocaleString()} meters
+- Already Packed / Dispatched: ${alreadyPackedOnWo.toLocaleString()} meters
+- Completed Now to Pack: ${totalPackedLength.toLocaleString()} meters
+- Remaining Left in WO: ${remainingAfterThisPack.toLocaleString()} meters
+- Drums Required (for this batch): ${estimatedDrumsNeeded} drums (Standard capacity ~${capacity}m / drum)
 - Empty Drums Currently in Factory Yard: ${availableInYardCount} drums
 - SHORTAGE OF DRUMS: ${shortageDrumsCount} drums needed
 
@@ -697,29 +826,33 @@ MFolks Cable Division`;
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-3xl md:max-w-4xl lg:w-[72vw] lg:max-w-[1180px] bg-white p-0 flex flex-col h-full shadow-2xl border-l border-slate-200"
-        >
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="w-[96vw] max-w-6xl max-h-[92vh] sm:max-w-6xl bg-white p-0 flex flex-col overflow-hidden rounded-xl shadow-2xl border border-slate-200">
           <div className="flex flex-col h-full overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-100 bg-white shrink-0">
-              <SheetHeader className="p-0">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
-                    <Package className="w-5 h-5" />
+            <div className="px-6 py-4 border-b border-slate-100 bg-white shrink-0">
+              <DialogHeader className="p-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-slate-100 text-slate-800">
+                      <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <DialogTitle className="text-base font-semibold text-slate-900">
+                        Create Packing List &amp; Outbound Challan
+                      </DialogTitle>
+                      <DialogDescription className="text-xs text-slate-500">
+                        Enter completed cable meters to pack now, assign drums, and generate the Outbound Challan
+                      </DialogDescription>
+                    </div>
                   </div>
-                  <div>
-                    <SheetTitle className="text-base font-semibold text-slate-900">
-                      Create Packing List
-                    </SheetTitle>
-                    <SheetDescription className="text-xs text-slate-500">
-                      Allocate cable lengths to yard drums and finalize packing
-                    </SheetDescription>
-                  </div>
+                  {selectedWorkOrder && (
+                    <Badge variant="outline" className="text-xs font-mono bg-indigo-50 text-indigo-700 border-indigo-200">
+                      Inbound Challan: {inboundChallanDisplay}
+                    </Badge>
+                  )}
                 </div>
-              </SheetHeader>
+              </DialogHeader>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-slate-50/50">
@@ -746,7 +879,7 @@ MFolks Cable Division`;
                     <span>Work Order *</span>
                     {filteredWorkOrders.length > 0 && (
                       <span className="text-[10px] text-emerald-600 font-normal">
-                        {filteredWorkOrders.length} available to pack
+                        {filteredWorkOrders.length} active to pack
                       </span>
                     )}
                   </Label>
@@ -759,29 +892,22 @@ MFolks Cable Division`;
                     }}
                     placeholder={
                       isLoadingOrders
-                        ? "Loading work orders..."
+                        ? 'Loading work orders...'
                         : filteredWorkOrders.length === 0
-                        ? (completedWorkOrdersCount > 0
-                            ? "All completed WOs are already packed"
-                            : "No completed WOs found")
-                        : "Choose Work Order..."
+                        ? activeWorkOrdersCount > 0
+                          ? 'All work orders are fully packed'
+                          : 'No work orders found'
+                        : 'Choose Work Order...'
                     }
                     emptyMessage={
-                      completedWorkOrdersCount > 0
-                        ? "All completed work orders for this customer are already packed into packing lists"
-                        : "No completed work orders available for packing"
+                      activeWorkOrdersCount > 0
+                        ? 'All work orders for this customer are fully packed (0 m left)'
+                        : 'No active work orders available for packing'
                     }
                     searchPlaceholder="Search by WO # or cable..."
                     disabled={isLoadingOrders || filteredWorkOrders.length === 0}
                     className="h-9 text-xs bg-white w-full"
                   />
-                  {filteredWorkOrders.length === 0 && !isLoadingOrders && (
-                    <p className="text-[11px] text-amber-600 leading-tight">
-                      {completedWorkOrdersCount > 0
-                        ? `All ${completedWorkOrdersCount} completed work order(s) are already packed into packing lists.`
-                        : "Only work orders marked as 'COMPLETED' appear here for packing into drums."}
-                    </p>
-                  )}
                 </div>
 
                 {/* 3. Cable Size */}
@@ -819,10 +945,10 @@ MFolks Cable Division`;
                   />
                 </div>
 
-                {/* 6. Challan Ref No */}
+                {/* 6. Outbound Challan Ref No */}
                 <div className="space-y-1.5 min-w-0">
                   <Label className="text-xs font-medium text-slate-700">
-                    Challan Ref No.
+                    Outbound Challan No.
                   </Label>
                   <Input
                     value={challanNumber}
@@ -833,17 +959,60 @@ MFolks Cable Division`;
                 </div>
               </div>
 
-              {/* Drum Allocation Assistant */}
+              {/* Work Order Progress & Manual "Completed Quantity to Pack Now" Section */}
               {selectedWorkOrder && (
-                <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-xs font-semibold text-slate-900">
-                        Allocation Assistant
-                      </h3>
-                      <p className="text-[11px] text-slate-500">
-                        Automatically split target length into available drums
-                      </p>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-4">
+                  {/* Top Row: Manual Input for Completed Meters to Pack Now + Action Buttons */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-1">
+                      <div className="bg-indigo-50/80 border border-indigo-200 rounded-lg px-3.5 py-2 flex items-center gap-3">
+                        <div>
+                          <Label className="text-[11px] font-bold text-indigo-950 uppercase block">
+                            Completed Qty to Pack Now (m) *
+                          </Label>
+                          <span className="text-[10px] text-indigo-700">
+                            Type how much length is done &amp; ready to pack in this batch
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={targetPoLength || undefined}
+                            step="1"
+                            value={completedLengthToPack}
+                            onChange={(e) => handleCompletedLengthInputChange(e.target.value)}
+                            className="h-9 w-28 text-sm font-mono font-bold text-indigo-950 bg-white border-indigo-300 text-right"
+                          />
+                          <span className="text-xs font-semibold text-indigo-900">m</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-2">
+                        <div>
+                          <span className="text-[10px] font-medium text-slate-500 uppercase block">
+                            Max / Drum
+                          </span>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <Input
+                              type="number"
+                              min="1"
+                              step="50"
+                              value={drumCapacityMeters}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDrumCapacityMeters(val);
+                                if (Number(val) > 0 && Number(completedLengthToPack) > 0) {
+                                  const drumsPool = selectedRgp === 'ALL' ? activeDrumsPool : drumsForRgp;
+                                  allocateLengthAcrossDrums(completedLengthToPack, val, drumsPool, selectedWorkOrder);
+                                }
+                              }}
+                              className="h-7 w-20 text-xs font-mono font-medium bg-white px-2 border-slate-200"
+                            />
+                            <span className="text-xs text-slate-500">m</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -854,37 +1023,79 @@ MFolks Cable Division`;
                         className="h-8 text-xs font-medium gap-1.5 bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
                       >
                         <Calculator className="w-3.5 h-3.5" />
-                        Auto-Allocate
+                        Split into Drums
                       </Button>
 
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleAutoAllocateDrums(true)}
+                        onClick={() => {
+                          setCompletedLengthToPack(targetPoLength);
+                          const drumsPool = selectedRgp === 'ALL' ? activeDrumsPool : drumsForRgp;
+                          allocateLengthAcrossDrums(targetPoLength, drumCapacityMeters, drumsPool, selectedWorkOrder);
+                        }}
                         className="h-8 text-xs font-medium gap-1.5 bg-white text-slate-700 cursor-pointer"
                       >
-                        <FileText className="w-3.5 h-3.5" />
-                        Sample (1,997 m)
+                        Pack All Remaining ({targetPoLength.toLocaleString()} m)
                       </Button>
                     </div>
                   </div>
 
-                  {/* Metrics Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-slate-100">
+                  {/* Work Order Tracking Metrics Grid: Total WO | Already Done & Packed | Packing Now | Remaining Left | Inbound Challan */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-[10px] font-medium text-slate-500 uppercase block">
-                        Target Length
+                        Total Work Order
                       </span>
                       <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
-                        {targetPoLength.toLocaleString()} m
+                        {orderedPoLength.toLocaleString()} m
                       </div>
+                      <span className="text-[10px] text-slate-500">
+                        WO #{selectedWorkOrder.workOrderNumber}
+                      </span>
+                    </div>
+
+                    <div className="bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200/80">
+                      <span className="text-[10px] font-medium text-emerald-700 uppercase block">
+                        Already Done &amp; Packed
+                      </span>
+                      <div className="text-sm font-semibold font-mono text-emerald-900 mt-0.5">
+                        {alreadyPackedOnWo.toLocaleString()} m
+                      </div>
+                      <span className="text-[10px] text-emerald-700">
+                        {orderedPoLength > 0 ? Math.round((alreadyPackedOnWo / orderedPoLength) * 100) : 0}% previously packed
+                      </span>
+                    </div>
+
+                    <div className="bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-200">
+                      <span className="text-[10px] font-medium text-indigo-700 uppercase block">
+                        Packing Now (Done)
+                      </span>
+                      <div className="text-sm font-bold font-mono text-indigo-900 mt-0.5">
+                        {totalPackedLength.toLocaleString()} m
+                      </div>
+                      <span className="text-[10px] text-indigo-700">
+                        Across {lines.length} drum{lines.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="bg-amber-50/60 p-2.5 rounded-lg border border-amber-200/80">
+                      <span className="text-[10px] font-medium text-amber-800 uppercase block">
+                        Remaining Left in WO
+                      </span>
+                      <div className="text-sm font-semibold font-mono text-amber-900 mt-0.5">
+                        {remainingAfterThisPack.toLocaleString()} m
+                      </div>
+                      <span className="text-[10px] text-amber-700">
+                        {remainingAfterThisPack === 0 ? 'Completes full order' : 'Left for next batch'}
+                      </span>
                     </div>
 
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-medium text-slate-500 uppercase block">
-                          Drums in Yard
+                          Inbound Challan / Drums
                         </span>
                         {allYardDrums.length > availableDrums.length && (
                           <button
@@ -896,35 +1107,12 @@ MFolks Cable Division`;
                           </button>
                         )}
                       </div>
-                      <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
-                        {drumsForRgp.length} available
+                      <div className="text-xs font-semibold font-mono text-slate-900 mt-0.5 truncate" title={inboundChallanDisplay}>
+                        {inboundChallanDisplay}
                       </div>
-                    </div>
-
-                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-[10px] font-medium text-slate-500 uppercase block">
-                        Capacity / Drum
+                      <span className="text-[10px] text-slate-500">
+                        {drumsForRgp.length} empty drums in yard
                       </span>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <Input
-                          type="number"
-                          min="1"
-                          step="50"
-                          value={drumCapacityMeters}
-                          onChange={(e) => setDrumCapacityMeters(e.target.value)}
-                          className="h-6 w-20 text-xs font-mono font-medium bg-white px-2 border-slate-200"
-                        />
-                        <span className="text-xs text-slate-500">m</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-[10px] font-medium text-slate-500 uppercase block">
-                        Drums Needed
-                      </span>
-                      <div className="text-sm font-semibold font-mono text-slate-900 mt-0.5">
-                        {estimatedDrumsNeeded} drums
-                      </div>
                     </div>
                   </div>
 
@@ -958,7 +1146,7 @@ MFolks Cable Division`;
                         </span>
                       ) : (
                         <span>
-                          Total Available: {activeDrumsPool.length}
+                          Total Empty Drums Available: {activeDrumsPool.length}
                         </span>
                       )}
                     </div>
@@ -970,7 +1158,7 @@ MFolks Cable Division`;
                       <div className="flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                         <span className="text-amber-900 font-medium">
-                          Shortage: Order needs {shortageDrumsCount} more drum{shortageDrumsCount > 1 ? 's' : ''} from {customerName}.
+                          Shortage: Batch needs {shortageDrumsCount} more drum{shortageDrumsCount > 1 ? 's' : ''} from {customerName}.
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -1023,7 +1211,7 @@ MFolks Cable Division`;
                 <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-semibold text-slate-800">
-                      Drums Allocation
+                      Drums Allocation ({lines.length} drum{lines.length > 1 ? 's' : ''})
                     </h3>
                   </div>
 
@@ -1035,7 +1223,7 @@ MFolks Cable Division`;
                     className="h-7 text-xs gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Add Row
+                    Add Drum Row
                   </Button>
                 </div>
 
@@ -1191,7 +1379,7 @@ MFolks Cable Division`;
                     {/* Table Totals Row */}
                     <TableRow className="bg-slate-100/90 font-bold border-t-2 border-slate-300">
                       <TableCell colSpan={2} className="text-right text-xs text-slate-800">
-                        TOTAL PACKED LENGTH:
+                        PACKING NOW (COMPLETED):
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs text-slate-600">
                         {lines.reduce((acc, curr) => acc + (Number(curr.lengthBottom) || 0), 0)} m
@@ -1204,21 +1392,25 @@ MFolks Cable Division`;
                       </TableCell>
                       <TableCell colSpan={5} className="text-xs">
                         {selectedWorkOrder && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[11px] text-slate-600">
-                              Target PO: <strong className="font-mono">{targetPoLength.toLocaleString()} m</strong>
+                              Done after this:{' '}
+                              <strong className="font-mono text-emerald-700">
+                                {(alreadyPackedOnWo + totalPackedLength).toLocaleString()} m
+                              </strong>{' '}
+                              / {orderedPoLength.toLocaleString()} m
                             </span>
                             {lengthDifference === 0 ? (
                               <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300">
-                                100% Exact Match
+                                0 m left (Completes WO)
                               </Badge>
                             ) : lengthDifference > 0 ? (
                               <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-300">
-                                +{lengthDifference} m Extra
+                                +{lengthDifference} m over remaining
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 border-rose-300">
-                                {lengthDifference} m Remaining
+                              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-300">
+                                Partial · {Math.abs(lengthDifference).toLocaleString()} m still left in WO
                               </Badge>
                             )}
                           </div>
@@ -1276,13 +1468,13 @@ MFolks Cable Division`;
                   className="text-xs h-9 bg-slate-900 hover:bg-slate-800 text-white font-medium gap-1.5 cursor-pointer shadow-xs"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {isSubmitting ? 'Packing...' : 'Finalize & Pack'}
+                  {isSubmitting ? 'Packing & Generating Challan...' : 'Pack & Generate Outbound Challan'}
                 </Button>
               </div>
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       {/* DRUM SHORTAGE: ASK MORE DRUMS FROM COMPANY DIALOG */}
       <Dialog open={requestDrumsModalOpen} onOpenChange={setRequestDrumsModalOpen}>
@@ -1297,7 +1489,7 @@ MFolks Cable Division`;
                   Request Additional Drums
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500">
-                  {customerName} needs to supply +{shortageDrumsCount} drums to complete this order
+                  {customerName} needs to supply +{shortageDrumsCount} drums to complete this batch
                 </DialogDescription>
               </div>
             </div>
@@ -1307,8 +1499,8 @@ MFolks Cable Division`;
             {/* Quick Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
-                <span className="text-[10px] font-medium text-slate-500 uppercase block">Target Length</span>
-                <span className="text-xs font-semibold font-mono text-slate-900">{targetPoLength.toLocaleString()} m</span>
+                <span className="text-[10px] font-medium text-slate-500 uppercase block">Packing Now</span>
+                <span className="text-xs font-semibold font-mono text-slate-900">{totalPackedLength.toLocaleString()} m</span>
               </div>
               <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
                 <span className="text-[10px] font-medium text-slate-500 uppercase block">Required</span>
@@ -1328,7 +1520,7 @@ MFolks Cable Division`;
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold text-slate-700">
-                  Formal Drum Request Message (Ready for WhatsApp / Email)
+                  Customer Message (WhatsApp / Email)
                 </Label>
                 <Button
                   type="button"
