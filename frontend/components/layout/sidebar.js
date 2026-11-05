@@ -187,23 +187,17 @@ export function Sidebar({ className }) {
         )}
       >
         {/* Brand Header */}
-        <div className="h-16 px-5 border-b border-slate-200 flex items-center justify-between">
-          <Link href="/dashboard/admins" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-sm shadow-slate-300">
-              <span className="font-bold text-sm tracking-tighter">MF</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm tracking-tight text-slate-900">
-                Mfolks ERP
-              </span>
-              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                Console Studio
-              </span>
-            </div>
+        <div className="h-16 px-4 border-b border-slate-200 flex items-center justify-between gap-2">
+          <Link href="/dashboard/admins" className="flex items-center min-w-0">
+            <img
+              src="/mfolks-logo.png"
+              alt="MFOLKS - Legacy That Builds Tomorrow"
+              className="h-10 w-auto max-w-[180px] object-contain"
+            />
           </Link>
           <Badge
             variant="outline"
-            className="text-[10px] font-mono px-1.5 py-0 border-slate-200 text-slate-600 bg-slate-50"
+            className="text-[10px] font-mono px-1.5 py-0 border-slate-200 text-slate-600 bg-slate-50 shrink-0"
           >
             v1.0
           </Badge>

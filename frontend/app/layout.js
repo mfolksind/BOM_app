@@ -6,6 +6,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 export const metadata = {
   title: "Mfolks ERP - Admin Management Console",
   description: "Manufacturing & Job-Work Operations Admin Control Panel",
+  icons: {
+    icon: "/mfolks-icon.png",
+    shortcut: "/mfolks-icon.png",
+    apple: "/mfolks-icon.png",
+  },
 };
 
 export default function RootLayout({ children }) {
